@@ -1,0 +1,192 @@
+part of 'main.dart';
+
+// ======================= Entry form =======================
+
+/// Modal form for creating or editing a fuel fill-up.
+class EntryForm extends StatefulWidget {
+  final FuelEntry? existing;
+  final double? lastOdometer;
+  final Future<void> Function()? onDelete;
+
+  /// Creates an add or edit form, optionally with existing entry and delete actions.
+  const EntryForm({
+    super.key,
+    this.existing,
+    this.lastOdometer,
+    this.onDelete,
+  });
+
+  /// Creates the entry form state.
+  @override
+  State<EntryForm> createState() => _EntryFormState();
+}
+
+/// State that validates and submits fuel fill-up form values.
+class _EntryFormState extends State<EntryForm> {
+  final _formKey = GlobalKey<FormState>();
+  late DateTime _date;
+  late final TextEditingController _price;
+  late final TextEditingController _volume;
+  late final TextEditingController _odo;
+
+  /// Initializes form controllers and date from a new or existing entry.
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    _date = e?.date ?? DateTime.now();
+    _price = TextEditingController(text: e != null ? '${e.price}' : '');
+    _volume = TextEditingController(text: e != null ? '${e.volume}' : '');
+    _odo = TextEditingController(text: e != null ? '${e.odometer}' : '');
+  }
+
+  /// Releases the form text editing controllers.
+  @override
+  void dispose() {
+    _price.dispose();
+    _volume.dispose();
+    _odo.dispose();
+    super.dispose();
+  }
+
+  /// Parses a localized decimal string into a double.
+  double? _parse(String s) => double.tryParse(s.trim().replaceAll(',', '.'));
+
+  /// Validates that a required numeric field exists and is positive.
+  String? _positive(String? s) {
+    final v = _parse(s ?? '');
+    if (v == null) return 'Enter a number';
+    if (v <= 0) return 'Must be greater than 0';
+    return null;
+  }
+
+  /// Calculates the current price-times-volume preview when both values parse.
+  double? get _previewTotal {
+    final p = _parse(_price.text);
+    final v = _parse(_volume.text);
+    return (p != null && v != null) ? p * v : null;
+  }
+
+  /// Opens a date picker and updates the selected fill-up date.
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+    );
+    if (picked != null) setState(() => _date = picked);
+  }
+
+  /// Validates the form and returns a created or edited entry to the caller.
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.pop(
+      context,
+      FuelEntry(
+        id: widget.existing?.id ??
+            DateTime.now().microsecondsSinceEpoch.toString(),
+        date: DateTime(_date.year, _date.month, _date.day),
+        price: _parse(_price.text)!,
+        volume: _parse(_volume.text)!,
+        odometer: _parse(_odo.text)!,
+        updatedAt: DateTime.now(),
+      ),
+    );
+  }
+
+  /// Builds the fill-up date, numeric fields, preview, and save controls.
+  @override
+  Widget build(BuildContext context) {
+    const decimal = TextInputType.numberWithOptions(decimal: true);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      child: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.existing == null ? 'New fill-up' : 'Edit fill-up',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  if (widget.existing != null)
+                    IconButton(
+                      tooltip: 'Delete fill-up',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: widget.onDelete == null
+                          ? null
+                          : () async => widget.onDelete!(),
+                      icon: Icon(
+                        Icons.delete_outline,
+                        size: 20,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _pickDate,
+                icon: const Icon(Icons.calendar_today, size: 18),
+                label: Text(_dateFmt.format(_date)),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _price,
+                keyboardType: decimal,
+                decoration: const InputDecoration(
+                  labelText: 'Fuel price per $kVolumeUnit',
+                  prefixText: '$kCurrency ',
+                  border: OutlineInputBorder(),
+                ),
+                validator: _positive,
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _volume,
+                keyboardType: decimal,
+                decoration: const InputDecoration(
+                  labelText: 'Amount purchased',
+                  suffixText: kVolumeUnit,
+                  border: OutlineInputBorder(),
+                ),
+                validator: _positive,
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _odo,
+                keyboardType: decimal,
+                decoration: InputDecoration(
+                  labelText: 'Odometer reading',
+                  suffixText: kDistanceUnit,
+                  helperText: widget.lastOdometer != null
+                      ? 'Latest logged: ${_num1.format(widget.lastOdometer)}'
+                      : null,
+                  border: const OutlineInputBorder(),
+                ),
+                validator: _positive,
+              ),
+              const SizedBox(height: 12),
+              if (_previewTotal != null)
+                Text('Total: ${_money.format(_previewTotal)}',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              FilledButton(onPressed: _submit, child: const Text('Save')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

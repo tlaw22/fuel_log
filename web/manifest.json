@@ -1,6 +1,6 @@
 {
-    "name": "fuel_log",
-    "short_name": "fuel_log",
+    "name": "FuelLog",
+    "short_name": "FuelLog",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
