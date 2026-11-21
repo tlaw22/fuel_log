@@ -226,6 +226,32 @@ void main() {
     expect(find.byType(TextField), findsNothing);
   });
 
+  testWidgets('Stations page is in the carousel and includes saved totals',
+      (tester) async {
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'fuel_entries_v1': jsonEncode([
+        _entry(id: 'current-month', updatedAt: now, price: 5, date: now)
+            .toJson(),
+      ]),
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Next page'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Next page'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Next page'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Stations'), findsOneWidget);
+    expect(find.text('Nearby fuel stations'), findsOneWidget);
+    expect(find.text('Totals from this phone'), findsOneWidget);
+    expect(find.text('Station data © OpenStreetMap contributors.'),
+        findsOneWidget);
+  });
+
   testWidgets('saving a budget stores it for the current month',
       (tester) async {
     SharedPreferences.setMockInitialValues({});

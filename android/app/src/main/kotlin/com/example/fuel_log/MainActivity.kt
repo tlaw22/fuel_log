@@ -21,6 +21,21 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "androidSdkInt" -> result.success(Build.VERSION.SDK_INT)
+                "findNearbyFuelStations" -> FuelStationRepository.findNearby(this) { searchResult ->
+                    searchResult.fold(
+                        onSuccess = { stations ->
+                            result.success(stations.map(FuelStation::toChannelMap))
+                        },
+                        onFailure = { error ->
+                            val searchError = error as? StationSearchException
+                            result.error(
+                                searchError?.code ?: "station_search_failed",
+                                error.message ?: "Could not load nearby fuel stations.",
+                                null,
+                            )
+                        },
+                    )
+                }
                 "saveCsv" -> {
                     val name = call.argument<String>("name")
                     val bytes = call.argument<ByteArray>("bytes")

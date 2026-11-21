@@ -16,11 +16,12 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   static const _prefsKey = 'fuel_entries_v1';
   static const _deletedPrefsKey = 'fuel_entries_deleted_v1';
-  static const _pageNames = ['Log', 'Totals', 'Graphs'];
+  static const _pageNames = ['Log', 'Totals', 'Graphs', 'Stations'];
   static const _pageIcons = [
     Icons.list_alt,
     Icons.bar_chart,
     Icons.pie_chart_outline,
+    Icons.local_gas_station,
   ];
   final CarouselSliderController _carouselController =
       CarouselSliderController();
@@ -171,7 +172,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Builds the swipeable Log, Totals, and Graphs carousel.
+  /// Builds the swipeable Log, Totals, Graphs, and Stations carousel.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -314,7 +315,11 @@ class _HomePageState extends State<HomePage> {
                           final page = switch (index) {
                             0 => _buildLog(),
                             1 => _buildSummary(),
-                            _ => GraphicsPage(
+                            2 => GraphicsPage(
+                                entries: _entries,
+                                distances: _distances,
+                              ),
+                            _ => FuelStationsPage(
                                 entries: _entries,
                                 distances: _distances,
                               ),
