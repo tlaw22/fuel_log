@@ -3,6 +3,9 @@
 A Flutter app for tracking fuel fill-ups, spending, totals, and fuel efficiency
 on Android and Windows.
 
+Demo of app available on YouTube.
+[Watch the demo video - LINK](https://youtube.com/shorts/qNGNHvHNSpI?si=G2GmWQhQoJeuR-hz)
+
 ## Main sections
 
 The home screen uses one carousel with these sections:
