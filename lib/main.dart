@@ -17,7 +17,6 @@ part 'graphs_page.dart';
 part 'nearby_sync_page.dart';
 part 'shared_widgets.dart';
 part 'entry_form.dart';
-part 'aAuto.dart';
 
 const MethodChannel _androidNativeChannel =
     MethodChannel('com.example.fuel_log/native');
@@ -64,6 +63,7 @@ ThemeData buildTheme() {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
+    fontFamily: 'BBH Bogle',
     scaffoldBackgroundColor: kNavy900,
     appBarTheme: const AppBarTheme(
       backgroundColor: kNavy800,

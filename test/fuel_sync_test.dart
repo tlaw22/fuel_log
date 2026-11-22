@@ -22,6 +22,13 @@ FuelEntry _entry({
     );
 
 void main() {
+  test('BBH Bogle is the global text font', () {
+    final theme = buildTheme();
+
+    expect(theme.textTheme.bodyMedium?.fontFamily, 'BBH Bogle');
+    expect(theme.textTheme.titleLarge?.fontFamily, 'BBH Bogle');
+  });
+
   test('loads legacy entries without an edit timestamp', () {
     final date = DateTime(2026, 1, 1);
     final entry = FuelEntry.fromJson({
@@ -186,70 +193,6 @@ void main() {
     expect(find.text('Miles driven'), findsOneWidget);
     expect(find.text('300.0 mi'), findsOneWidget);
     expect(find.text('30.0 mi/gal'), findsOneWidget);
-  });
-
-  testWidgets('Android Auto outputs open as a read-only Totals and Graphs page',
-      (tester) async {
-    final now = DateTime.now();
-    final previousMonth = DateTime(now.year, now.month - 1, 15);
-    final entries = [
-      _entry(
-        id: 'previous-month',
-        updatedAt: previousMonth,
-        price: 2,
-        date: previousMonth,
-        odometer: 1000,
-      ),
-      _entry(
-        id: 'current-month',
-        updatedAt: now,
-        price: 5,
-        date: now,
-        odometer: 1300,
-      ),
-    ];
-    SharedPreferences.setMockInitialValues({
-      'fuel_entries_v1':
-          jsonEncode(entries.map((entry) => entry.toJson()).toList()),
-      'fuel_monthly_budget_${now.year}_${now.month}': 250.0,
-    });
-
-    await tester.pumpWidget(const MaterialApp(home: HomePage()));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Open Android Auto outputs'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Totals'), findsOneWidget);
-    expect(find.text('Graphs'), findsOneWidget);
-    expect(find.text('300.0 mi'), findsNWidgets(3));
-    expect(find.text('30.0 mi/gal'), findsNWidgets(3));
-    expect(find.byType(TextField), findsNothing);
-  });
-
-  testWidgets('Stations page is in the carousel and includes saved totals',
-      (tester) async {
-    final now = DateTime.now();
-    SharedPreferences.setMockInitialValues({
-      'fuel_entries_v1': jsonEncode([
-        _entry(id: 'current-month', updatedAt: now, price: 5, date: now)
-            .toJson(),
-      ]),
-    });
-
-    await tester.pumpWidget(const MaterialApp(home: HomePage()));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Next page'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Next page'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Next page'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Stations'), findsOneWidget);
-    expect(find.text('Nearby fuel stations'), findsOneWidget);
-    expect(find.text('Totals from this phone'), findsOneWidget);
-    expect(find.text('Station data © OpenStreetMap contributors.'),
-        findsOneWidget);
   });
 
   testWidgets('saving a budget stores it for the current month',

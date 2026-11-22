@@ -16,12 +16,11 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   static const _prefsKey = 'fuel_entries_v1';
   static const _deletedPrefsKey = 'fuel_entries_deleted_v1';
-  static const _pageNames = ['Log', 'Totals', 'Graphs', 'Stations'];
+  static const _pageNames = ['Log', 'Totals', 'Graphs'];
   static const _pageIcons = [
     Icons.list_alt,
     Icons.bar_chart,
     Icons.pie_chart_outline,
-    Icons.local_gas_station,
   ];
   final CarouselSliderController _carouselController =
       CarouselSliderController();
@@ -172,31 +171,17 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Builds the swipeable Log, Totals, Graphs, and Stations carousel.
+  /// Builds the swipeable Log, Totals, and Graphs carousel.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
         title: const Text(
-          'FuelLog',
-          style: TextStyle(fontFamily: 'BBH Bogle', fontSize: 18),
+          'Fuel Fill-ups Log',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Open Android Auto outputs',
-            icon: const Icon(Icons.directions_car_outlined),
-            onPressed: _loaded
-                ? () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => AndroidAutoScreen(
-                          entries: List.of(_entries),
-                          distances: Map.of(_distances),
-                        ),
-                      ),
-                    )
-                : null,
-          ),
           IconButton(
             tooltip: 'Sync nearby',
             icon: const Icon(Icons.sync),
@@ -315,11 +300,7 @@ class _HomePageState extends State<HomePage> {
                           final page = switch (index) {
                             0 => _buildLog(),
                             1 => _buildSummary(),
-                            2 => GraphicsPage(
-                                entries: _entries,
-                                distances: _distances,
-                              ),
-                            _ => FuelStationsPage(
+                            _ => GraphicsPage(
                                 entries: _entries,
                                 distances: _distances,
                               ),
