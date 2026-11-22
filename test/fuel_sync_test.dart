@@ -102,13 +102,32 @@ void main() {
     expect(find.byTooltip('Switch to dark theme'), findsOneWidget);
   });
 
+  testWidgets('startup shows local-data progress and privacy notice',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+
+    expect(find.text('Loading Local Data'), findsOneWidget);
+    expect(
+      find.text('This app does not sell/share/collect any data.'),
+      findsOneWidget,
+    );
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.textContaining('% loaded'), findsOneWidget);
+
+    await tester.pumpAndSettle();
+    expect(find.text('Loading Local Data'), findsNothing);
+  });
+
   testWidgets('new fill-up form shows a pump camera action', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: Scaffold(body: EntryForm())),
     );
 
     expect(find.byTooltip('Take pump photo'), findsOneWidget);
-    expect(find.byIcon(Icons.photo_camera_outlined), findsOneWidget);
+    final pumpIcon =
+        tester.widget<Icon>(find.byIcon(Icons.photo_camera_outlined));
+    expect(pumpIcon.size, 40);
   });
 
   testWidgets('AppBar menu includes CSV and backup actions', (tester) async {
@@ -116,13 +135,93 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('App menu'));
+    final menuFinder = find.byTooltip('App menu');
+    final menuButtonFinder = find.byWidgetPredicate(
+      (widget) => widget is PopupMenuButton && widget.tooltip == 'App menu',
+    );
+    final menuButton =
+        tester.widget<PopupMenuButton<dynamic>>(menuButtonFinder);
+    final colorScheme = Theme.of(tester.element(menuFinder)).colorScheme;
+    expect(
+      menuButton.style?.side?.resolve({})?.color,
+      colorScheme.secondary,
+    );
+
+    await tester.tap(menuFinder);
     await tester.pumpAndSettle();
 
     expect(find.text('Load CSV'), findsOneWidget);
     expect(find.text('Save CSV'), findsOneWidget);
     expect(find.text('Share CSV backup'), findsOneWidget);
     expect(find.text('About'), findsOneWidget);
+    expect(find.text('Wipe Data'), findsOneWidget);
+  });
+
+  testWidgets('Wipe Data confirms, warns, and clears saved app data',
+      (tester) async {
+    final now = DateTime.now();
+    final previousMonth = DateTime(now.year, now.month - 1);
+    final entry = _entry(
+      id: 'to-wipe',
+      updatedAt: now,
+      price: 5,
+      date: now,
+    );
+    SharedPreferences.setMockInitialValues({
+      'fuel_entries_v1': jsonEncode([entry.toJson()]),
+      'fuel_entries_deleted_v1': jsonEncode({
+        'deleted-entry': now.toIso8601String(),
+      }),
+      'fuel_monthly_budget_${now.year}_${now.month}': 250.0,
+      'fuel_monthly_budget_${previousMonth.year}_${previousMonth.month}': 200.0,
+      'fuel_income_${now.year}_${now.month}': 5000.0,
+      'fuel_insurance_${now.year}_${now.month}': 150.0,
+      'fuel_car_payment_${now.year}_${now.month}': 300.0,
+      'fuel_theme_is_dark_v1': false,
+    });
+
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dismissible), findsOneWidget);
+
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wipe Data'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Fill-ups can only be restored from a backup CSV'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('pump photos are not included in CSV'),
+        findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    var prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('fuel_entries_v1'), isNotNull);
+
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wipe Data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wipe data'));
+    await tester.pumpAndSettle();
+
+    prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('fuel_entries_v1'), isNull);
+    expect(prefs.getString('fuel_entries_deleted_v1'), isNull);
+    expect(prefs.getDouble('fuel_monthly_budget_${now.year}_${now.month}'),
+        isNull);
+    expect(
+        prefs.getDouble(
+            'fuel_monthly_budget_${previousMonth.year}_${previousMonth.month}'),
+        isNull);
+    expect(prefs.getDouble('fuel_income_${now.year}_${now.month}'), isNull);
+    expect(prefs.getDouble('fuel_insurance_${now.year}_${now.month}'), isNull);
+    expect(
+        prefs.getDouble('fuel_car_payment_${now.year}_${now.month}'), isNull);
+    expect(prefs.getBool('fuel_theme_is_dark_v1'), isFalse);
+    expect(find.text('App data wiped.'), findsOneWidget);
   });
 
   testWidgets('About menu displays the bundled README', (tester) async {
@@ -269,7 +368,7 @@ void main() {
     final budgetField = find.byKey(const ValueKey('monthly-budget-input'));
     expect(tester.widget<TextField>(budgetField).controller!.text, '250.00');
     expect(find.text('20% of \$250.00'), findsOneWidget);
-    expect(find.text('28% of \$250.00'), findsOneWidget);
+    expect(find.text('28% of \$250.00'), findsNothing);
     expect(find.text('Miles driven'), findsOneWidget);
     expect(find.text('150.0 mi'), findsOneWidget);
     expect(find.text('Fuel efficiency'), findsOneWidget);
@@ -345,15 +444,20 @@ void main() {
       find.byKey(const ValueKey('monthly-budget-input')),
       '100',
     );
-    await tester.tap(find.text('Save budget'));
+    await tester.tap(find.text('Save monthly data'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Monthly budget data'), findsNothing);
+    expect(
+      find.text('Your data have been saved to the local disk.'),
+      findsOneWidget,
+    );
     final prefs = await SharedPreferences.getInstance();
     expect(
       prefs.getDouble('fuel_monthly_budget_${now.year}_${now.month}'),
       100,
     );
-    expect(find.text('50% of \$100.00'), findsNWidgets(2));
+    expect(find.text('50% of \$100.00'), findsOneWidget);
     expect(
       tester.widget<SnackBar>(find.byType(SnackBar)).duration,
       const Duration(seconds: 10),
@@ -395,6 +499,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('gross-monthly-income-input')),
         findsOneWidget);
+    expect(find.text('Save monthly data'), findsOneWidget);
+    expect(find.text('Save budget'), findsNothing);
+    expect(find.text('Save monthly details'), findsNothing);
     await tester.enterText(
       find.byKey(const ValueKey('gross-monthly-income-input')),
       '5000',
@@ -407,9 +514,17 @@ void main() {
       find.byKey(const ValueKey('monthly-car-payment-input')),
       '300',
     );
-    await tester.tap(find.text('Save monthly details'));
+    await tester.tap(find.text('Save monthly data'));
     await tester.pumpAndSettle();
 
+    expect(
+      find.byKey(const ValueKey('gross-monthly-income-input')),
+      findsNothing,
+    );
+    expect(
+      find.text('Your data have been saved to the local disk.'),
+      findsOneWidget,
+    );
     final prefs = await SharedPreferences.getInstance();
     expect(
       prefs.getDouble('fuel_income_${now.year}_${now.month}'),
@@ -427,8 +542,6 @@ void main() {
     expect(find.text('Previous month insurance'), findsOneWidget);
     expect(find.text('\$0.00'), findsWidgets);
 
-    Navigator.of(tester.element(find.byType(GraphicsPage))).pop();
-    await tester.pumpAndSettle();
     final chartTitle =
         '${DateFormat.yMMMM().format(now)} vs ${DateFormat.yMMMM().format(previousMonth)}';
     await tester.tap(find.text(chartTitle));
@@ -437,6 +550,42 @@ void main() {
     await tester.tap(find.text(chartTitle));
     await tester.pumpAndSettle();
     expect(find.text('Current month travel expenses'), findsOneWidget);
+  });
+
+  testWidgets('nearby sync requires a sender or receiver selection',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NearbySyncPage(
+          snapshot: () => const SyncSnapshot(entries: [], deletions: {}),
+          onSnapshotReceived: (_) async => 0,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Select a role before connecting or syncing.'),
+      findsOneWidget,
+    );
+    expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Sender'))
+            .selected,
+        isFalse);
+    await tester.tap(find.text('Receiver'));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Receiver'))
+          .selected,
+      isTrue,
+    );
+    expect(
+      find.text('This phone will receive and merge the Sender’s log.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('carousel swipes and controls navigate between app sections',

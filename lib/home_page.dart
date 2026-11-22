@@ -136,7 +136,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-enum _HomeMenuAction { loadCsv, saveCsv, shareCsv, about }
+enum _HomeMenuAction { loadCsv, saveCsv, shareCsv, about, wipeData }
 
 class _HomeMenuEntry extends StatelessWidget {
   final IconData icon;
@@ -165,6 +165,12 @@ class _HomeMenuEntry extends StatelessWidget {
 class _HomePageState extends State<HomePage> {
   static const _prefsKey = 'fuel_entries_v1';
   static const _deletedPrefsKey = 'fuel_entries_deleted_v1';
+  static const _monthlyDataPrefixes = [
+    _monthlyBudgetPrefsKeyPrefix,
+    'fuel_income_',
+    'fuel_insurance_',
+    'fuel_car_payment_',
+  ];
   static const _pageNames = ['Log', 'Totals', 'Graphs', 'Photos'];
   static const _pageIcons = [
     Icons.list_alt,
@@ -177,7 +183,10 @@ class _HomePageState extends State<HomePage> {
   List<FuelEntry> _entries = [];
   Map<String, DateTime> _deletions = {};
   bool _loaded = false;
+  double _loadingProgress = 0;
+  String? _loadError;
   int _currentPage = 0;
+  int _dataGeneration = 0;
 
   /// Loads persisted entries after the first frame of the home page.
   @override
@@ -188,21 +197,51 @@ class _HomePageState extends State<HomePage> {
 
   /// Loads active entries and deleted-entry tombstones from shared preferences.
   Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_prefsKey);
-    if (raw != null) {
-      final list = (jsonDecode(raw) as List)
-          .map((e) => FuelEntry.fromJson(e as Map<String, dynamic>))
-          .toList();
-      _entries = list;
-    }
-    final rawDeletions = prefs.getString(_deletedPrefsKey);
-    if (rawDeletions != null) {
-      _deletions = (jsonDecode(rawDeletions) as Map<String, dynamic>).map(
-        (id, value) => MapEntry(id, DateTime.parse(value as String)),
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() => _loadingProgress = 0.25);
+
+      final raw = prefs.getString(_prefsKey);
+      if (raw != null) {
+        final list = (jsonDecode(raw) as List)
+            .map((e) => FuelEntry.fromJson(e as Map<String, dynamic>))
+            .toList();
+        _entries = list;
+      }
+      if (!mounted) return;
+      setState(() => _loadingProgress = 0.7);
+
+      final rawDeletions = prefs.getString(_deletedPrefsKey);
+      if (rawDeletions != null) {
+        _deletions = (jsonDecode(rawDeletions) as Map<String, dynamic>).map(
+          (id, value) => MapEntry(id, DateTime.parse(value as String)),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _loadingProgress = 1;
+        _loaded = true;
+      });
+    } catch (error, stackTrace) {
+      if (!mounted) return;
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'FuelLog local data loading',
+        ),
       );
+      setState(() => _loadError = error.toString());
     }
-    setState(() => _loaded = true);
+  }
+
+  void _retryLoad() {
+    setState(() {
+      _loadError = null;
+      _loadingProgress = 0;
+    });
+    unawaited(_load());
   }
 
   /// Persists active entries and deleted-entry tombstones to shared preferences.
@@ -304,6 +343,96 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// Confirms and permanently removes saved app data and pump photos.
+  Future<void> _confirmWipeData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Wipe all data?'),
+        content: const Text(
+          'This permanently deletes all fill-ups, monthly budget data, and '
+          'saved pump photos. Fill-ups can only be restored from a backup '
+          'CSV. Monthly budget data and pump photos are not included in CSV '
+          'backups and cannot be restored.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Wipe data'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      if (Platform.isAndroid) {
+        final sdkInt =
+            await _androidNativeChannel.invokeMethod<int>('androidSdkInt');
+        if (sdkInt == null) {
+          throw StateError('Could not determine the Android version.');
+        }
+        if (sdkInt < 29) {
+          var permission = await Permission.storage.status;
+          if (!permission.isGranted) {
+            permission = await Permission.storage.request();
+          }
+          if (!mounted) return;
+          if (!permission.isGranted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Storage permission is required to wipe data.'),
+                duration: kAppSnackBarDuration,
+              ),
+            );
+            return;
+          }
+        }
+        final deletedPhotoCount = await _androidNativeChannel
+            .invokeMethod<int>('deleteAllPumpPhotos');
+        if (deletedPhotoCount == null) {
+          throw StateError('Android did not confirm pump photo deletion.');
+        }
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      final keysToRemove = prefs.getKeys().where((key) {
+        return key == _prefsKey ||
+            key == _deletedPrefsKey ||
+            _monthlyDataPrefixes.any(key.startsWith);
+      }).toList();
+      for (final key in keysToRemove) {
+        if (!await prefs.remove(key)) {
+          throw StateError('Could not remove saved data: $key');
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _entries = [];
+        _deletions = {};
+        _dataGeneration++;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('App data wiped.'),
+          duration: kAppSnackBarDuration,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not wipe all app data: $error'),
+          duration: kAppSnackBarDuration,
+        ),
+      );
+    }
+  }
+
   /// Deletes an entry, records its tombstone, and offers an undo action.
   Future<void> _delete(FuelEntry entry) async {
     final index = _entries.indexWhere((e) => e.id == entry.id);
@@ -340,101 +469,123 @@ class _HomePageState extends State<HomePage> {
         ? colorScheme.primary
         : colorScheme.onSurface;
     return Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        leading: PopupMenuButton<_HomeMenuAction>(
-          tooltip: 'App menu',
-          icon: const Icon(Icons.menu),
-          onSelected: (action) {
-            switch (action) {
-              case _HomeMenuAction.loadCsv:
-                unawaited(_importCsv());
-                break;
-              case _HomeMenuAction.saveCsv:
-                unawaited(_exportCsv());
-                break;
-              case _HomeMenuAction.shareCsv:
-                unawaited(_shareCsvBackup());
-                break;
-              case _HomeMenuAction.about:
-                unawaited(_showAbout());
-                break;
-            }
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: _HomeMenuAction.loadCsv,
-              child: _HomeMenuEntry(
-                icon: Icons.file_upload_outlined,
-                label: 'Load CSV',
+      backgroundColor: _loaded ? null : Colors.white,
+      appBar: _loaded
+          ? AppBar(
+              centerTitle: true,
+              leading: PopupMenuButton<_HomeMenuAction>(
+                tooltip: 'App menu',
+                icon: const Icon(Icons.menu),
+                style: IconButton.styleFrom(
+                  side: BorderSide(color: colorScheme.secondary),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                onSelected: (action) {
+                  switch (action) {
+                    case _HomeMenuAction.loadCsv:
+                      unawaited(_importCsv());
+                      break;
+                    case _HomeMenuAction.saveCsv:
+                      unawaited(_exportCsv());
+                      break;
+                    case _HomeMenuAction.shareCsv:
+                      unawaited(_shareCsvBackup());
+                      break;
+                    case _HomeMenuAction.about:
+                      unawaited(_showAbout());
+                      break;
+                    case _HomeMenuAction.wipeData:
+                      unawaited(_confirmWipeData());
+                      break;
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: _HomeMenuAction.loadCsv,
+                    child: _HomeMenuEntry(
+                      icon: Icons.file_upload_outlined,
+                      label: 'Load CSV',
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: _HomeMenuAction.saveCsv,
+                    child: _HomeMenuEntry(
+                      icon: Icons.file_download_outlined,
+                      label: 'Save CSV',
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: _HomeMenuAction.shareCsv,
+                    child: _HomeMenuEntry(
+                      icon: Icons.cloud_upload_outlined,
+                      label: 'Share CSV backup',
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: _HomeMenuAction.about,
+                    child: _HomeMenuEntry(
+                      icon: Icons.info_outline,
+                      label: 'About',
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: _HomeMenuAction.wipeData,
+                    child: _HomeMenuEntry(
+                      icon: Icons.delete_forever_outlined,
+                      label: 'Wipe Data',
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const PopupMenuItem(
-              value: _HomeMenuAction.saveCsv,
-              child: _HomeMenuEntry(
-                icon: Icons.file_download_outlined,
-                label: 'Save CSV',
+              title: const Text(
+                'Fuel Fill-ups Log',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-            ),
-            const PopupMenuItem(
-              value: _HomeMenuAction.shareCsv,
-              child: _HomeMenuEntry(
-                icon: Icons.cloud_upload_outlined,
-                label: 'Share CSV backup',
-              ),
-            ),
-            const PopupMenuItem(
-              value: _HomeMenuAction.about,
-              child: _HomeMenuEntry(
-                icon: Icons.info_outline,
-                label: 'About',
-              ),
-            ),
-          ],
-        ),
-        title: const Text(
-          'Fuel Fill-ups Log',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            tooltip: widget.isDarkTheme
-                ? 'Switch to light theme'
-                : 'Switch to dark theme',
-            icon: Icon(
-              widget.isDarkTheme ? Icons.light_mode : Icons.dark_mode,
-            ),
-            onPressed: widget.onToggleTheme,
-          ),
-          IconButton(
-            tooltip: 'Sync nearby',
-            icon: const Icon(Icons.sync),
-            onPressed: _loaded
-                ? () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => NearbySyncPage(
-                          snapshot: () => SyncSnapshot(
-                            entries: List.of(_entries),
-                            deletions: Map.of(_deletions),
-                          ),
-                          onSnapshotReceived: _mergeReceivedSnapshot,
-                        ),
-                      ),
-                    )
-                : null,
-          ),
-        ],
-      ),
-      floatingActionButton: Transform.translate(
-        offset: const Offset(0, -100),
-        child: FloatingActionButton.extended(
-          onPressed: () => _openForm(),
-          icon: const Icon(Icons.add),
-          label: const Text('Fill-up'),
-        ),
-      ),
+              actions: [
+                IconButton(
+                  tooltip: widget.isDarkTheme
+                      ? 'Switch to light theme'
+                      : 'Switch to dark theme',
+                  icon: Icon(
+                    widget.isDarkTheme ? Icons.light_mode : Icons.dark_mode,
+                  ),
+                  onPressed: widget.onToggleTheme,
+                ),
+                IconButton(
+                  tooltip: 'Sync nearby',
+                  icon: const Icon(Icons.sync),
+                  onPressed: _loaded
+                      ? () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => NearbySyncPage(
+                                snapshot: () => SyncSnapshot(
+                                  entries: List.of(_entries),
+                                  deletions: Map.of(_deletions),
+                                ),
+                                onSnapshotReceived: _mergeReceivedSnapshot,
+                              ),
+                            ),
+                          )
+                      : null,
+                ),
+              ],
+            )
+          : null,
+      floatingActionButton: _loaded
+          ? FloatingActionButton.extended(
+              onPressed: () => _openForm(),
+              icon: const Icon(Icons.add),
+              label: const Text('Fill-up'),
+            )
+          : null,
       body: !_loaded
-          ? const Center(child: CircularProgressIndicator())
+          ? _StartupLoadingScreen(
+              progress: _loadingProgress,
+              error: _loadError,
+              onRetry: _retryLoad,
+            )
           : Column(
               children: [
                 SafeArea(
@@ -528,11 +679,14 @@ class _HomePageState extends State<HomePage> {
                             0 => _buildLog(),
                             1 => _buildSummary(),
                             2 => GraphicsPage(
+                                key: ValueKey('graphs-$_dataGeneration'),
                                 entries: _entries,
                                 distances: _distances,
                               ),
-                            _ =>
-                              PumpPhotosPage(isActive: index == _currentPage),
+                            _ => PumpPhotosPage(
+                                key: ValueKey('photos-$_dataGeneration'),
+                                isActive: index == _currentPage,
+                              ),
                           };
                           return SizedBox(
                             width: constraints.maxWidth,

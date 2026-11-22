@@ -117,6 +117,17 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
+                "deleteAllPumpPhotos" -> {
+                    try {
+                        result.success(deleteAllPumpPhotos())
+                    } catch (error: Exception) {
+                        result.error(
+                            "delete_failed",
+                            error.message ?: "Could not delete pump photos.",
+                            null,
+                        )
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -259,6 +270,20 @@ class MainActivity : FlutterActivity() {
 
         val file = requireLegacyPumpPhoto(id)
         return file.delete()
+    }
+
+    private fun deleteAllPumpPhotos(): Int {
+        val photos = listPumpPhotos()
+        var deletedCount = 0
+        for (photo in photos) {
+            val id = photo["id"]
+                ?: throw IOException("A saved pump photo has no identifier.")
+            if (!deletePumpPhoto(id)) {
+                throw IOException("Could not delete saved pump photo $id.")
+            }
+            deletedCount++
+        }
+        return deletedCount
     }
 
     private fun requirePhotoStoragePermission() {

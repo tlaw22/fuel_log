@@ -95,10 +95,11 @@ class _GraphicsPageState extends State<GraphicsPage>
   double? _parseAmount(TextEditingController controller) =>
       double.tryParse(controller.text.trim().replaceAll(',', '.'));
 
-  /// Saves the entered budget for the current month.
-  Future<void> _saveBudget() async {
+  /// Saves the entered budget and monthly values with one action.
+  Future<void> _saveMonthlyData() async {
+    final budgetEntered = _budgetController.text.trim().isNotEmpty;
     final budget = _parseBudget();
-    if (budget == null || budget <= 0) {
+    if (budgetEntered && (budget == null || budget <= 0)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Enter a budget greater than zero.'),
@@ -108,29 +109,21 @@ class _GraphicsPageState extends State<GraphicsPage>
       return;
     }
 
-    final now = DateTime.now();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_budgetKey(now), budget);
-    if (!mounted) return;
-    setState(() => _budget = budget);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Monthly budget saved'),
-        duration: kAppSnackBarDuration,
-      ),
-    );
-  }
-
-  Future<void> _saveMonthlyValues() async {
+    final monthlyValuesEntered = [
+      _incomeController,
+      _insuranceController,
+      _carPaymentController,
+    ].any((controller) => controller.text.trim().isNotEmpty);
     final income = _parseAmount(_incomeController);
     final insurance = _parseAmount(_insuranceController);
     final carPayment = _parseAmount(_carPaymentController);
-    if (income == null ||
-        insurance == null ||
-        carPayment == null ||
-        income < 0 ||
-        insurance < 0 ||
-        carPayment < 0) {
+    if (monthlyValuesEntered &&
+        (income == null ||
+            insurance == null ||
+            carPayment == null ||
+            income < 0 ||
+            insurance < 0 ||
+            carPayment < 0)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Enter valid non-negative monthly amounts.'),
@@ -139,24 +132,60 @@ class _GraphicsPageState extends State<GraphicsPage>
       );
       return;
     }
+    if (!budgetEntered && !monthlyValuesEntered) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a budget or monthly details before saving.'),
+          duration: kAppSnackBarDuration,
+        ),
+      );
+      return;
+    }
 
     final now = DateTime.now();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_monthlyValueKey('income', now), income);
-    await prefs.setDouble(_monthlyValueKey('insurance', now), insurance);
-    await prefs.setDouble(_monthlyValueKey('car_payment', now), carPayment);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (budgetEntered && !await prefs.setDouble(_budgetKey(now), budget!)) {
+        throw StateError('The monthly budget was not saved.');
+      }
+      if (monthlyValuesEntered) {
+        if (!await prefs.setDouble(_monthlyValueKey('income', now), income!) ||
+            !await prefs.setDouble(
+                _monthlyValueKey('insurance', now), insurance!) ||
+            !await prefs.setDouble(
+                _monthlyValueKey('car_payment', now), carPayment!)) {
+          throw StateError('The monthly income and payments were not saved.');
+        }
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save monthly data: $error'),
+          duration: kAppSnackBarDuration,
+        ),
+      );
+      return;
+    }
     if (!mounted) return;
     setState(() {
-      _grossIncome = income;
-      _insurancePayment = insurance;
-      _carPayment = carPayment;
+      if (budgetEntered) _budget = budget;
+      if (monthlyValuesEntered) {
+        _grossIncome = income!;
+        _insurancePayment = insurance!;
+        _carPayment = carPayment!;
+      }
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Monthly income and payments saved'),
-        duration: kAppSnackBarDuration,
-      ),
-    );
+    final messenger = ScaffoldMessenger.of(context);
+    Navigator.of(context).pop();
+    messenger
+      ..clearSnackBars()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Your data have been saved to the local disk.'),
+          duration: kAppSnackBarDuration,
+        ),
+      );
   }
 
   /// Opens the sheet for editing this month's budget and payment details.
@@ -201,16 +230,9 @@ class _GraphicsPageState extends State<GraphicsPage>
                           : 'The previous month’s budget is carried forward.',
                     ),
                     onChanged: (_) => setState(() {}),
-                    onSubmitted: (_) => _saveBudget(),
+                    onSubmitted: (_) => _saveMonthlyData(),
                   ),
                   const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton(
-                      onPressed: _saveBudget,
-                      child: const Text('Save budget'),
-                    ),
-                  ),
                   const SizedBox(height: 8),
                   TextField(
                     key: const ValueKey('gross-monthly-income-input'),
@@ -263,8 +285,8 @@ class _GraphicsPageState extends State<GraphicsPage>
                   Align(
                     alignment: Alignment.centerRight,
                     child: FilledButton(
-                      onPressed: _saveMonthlyValues,
-                      child: const Text('Save monthly details'),
+                      onPressed: _saveMonthlyData,
+                      child: const Text('Save monthly data'),
                     ),
                   ),
                 ],
@@ -329,6 +351,7 @@ class _GraphicsPageState extends State<GraphicsPage>
           title: 'All-time spending',
           spent: allTimeSpent,
           budget: chartBudget,
+          showBudgetPercentage: false,
         ),
         const SizedBox(height: 12),
         _MonthlyTravelComparisonChart(
@@ -356,6 +379,7 @@ class _BudgetPieChart extends StatelessWidget {
   final double? budget;
   final double? distance;
   final double? efficiency;
+  final bool showBudgetPercentage;
 
   /// Creates a chart for the supplied spending total and budget.
   const _BudgetPieChart({
@@ -364,6 +388,7 @@ class _BudgetPieChart extends StatelessWidget {
     required this.budget,
     this.distance,
     this.efficiency,
+    this.showBudgetPercentage = true,
   });
 
   /// Builds the pie chart, legend, and budget progress details.
@@ -389,7 +414,9 @@ class _BudgetPieChart extends StatelessWidget {
           else ...[
             Center(
               child: Semantics(
-                label: '${(progress * 100).round()} percent of budget used',
+                label: showBudgetPercentage
+                    ? '${(progress * 100).round()} percent of budget used'
+                    : 'Spending compared to budget',
                 child: CustomPaint(
                   size: const Size.square(180),
                   painter: _BudgetPiePainter(
@@ -432,11 +459,13 @@ class _BudgetPieChart extends StatelessWidget {
                               ),
                             ),
                           ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${(spent / goal * 100).round()}% of ${_money.format(goal)}',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        if (showBudgetPercentage) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '${(spent / goal * 100).round()}% of ${_money.format(goal)}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
                       ],
                     ),
                   ),

@@ -219,7 +219,7 @@ class _EntryFormState extends State<EntryForm> {
                       tooltip: 'Take pump photo',
                       visualDensity: VisualDensity.compact,
                       onPressed: _takePumpPhoto,
-                      icon: const Icon(Icons.photo_camera_outlined, size: 20),
+                      icon: const Icon(Icons.photo_camera_outlined, size: 40),
                     ),
                   if (widget.existing != null)
                     IconButton(

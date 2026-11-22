@@ -9,6 +9,8 @@ class _IncomingTransfer {
   _IncomingTransfer(this.total);
 }
 
+enum _SyncRole { sender, receiver }
+
 /// Screen and callbacks for exchanging fuel data with a nearby Android phone.
 class NearbySyncPage extends StatefulWidget {
   final SyncSnapshot Function() snapshot;
@@ -28,7 +30,7 @@ class NearbySyncPage extends StatefulWidget {
 
 /// State that manages nearby discovery, connection, permissions, and transfer protocol.
 class _NearbySyncPageState extends State<NearbySyncPage> {
-  static const _protocol = 'fuel-log-sync-v1';
+  static const _protocol = 'fuel-log-sync-v2';
   static const _maxMessageBytes = 24000;
   static const _maxChunkRecords = 40;
 
@@ -37,6 +39,8 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
   String? _connectedDeviceId;
   String? _connectedDeviceName;
   String? _authenticationToken;
+  _SyncRole? _selectedRole;
+  _SyncRole? _remoteRole;
   final Map<String, _IncomingTransfer> _incomingTransfers = {};
   bool _starting = true;
   bool _serviceInitialized = false;
@@ -159,6 +163,7 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
       _connectionEstablished = false;
       _localReady = false;
       _remoteReady = false;
+      _remoteRole = null;
       _snapshotSent = false;
       _complete = false;
       _incomingTransfers.clear();
@@ -195,6 +200,11 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
         _connectedDeviceName = null;
         _authenticationToken = null;
         _connectionEstablished = false;
+        _localReady = false;
+        _remoteReady = false;
+        _remoteRole = null;
+        _snapshotSent = false;
+        _complete = false;
       });
       _showError('Nearby connection failed: $status');
     }
@@ -210,6 +220,8 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
       _connectionEstablished = false;
       _localReady = false;
       _remoteReady = false;
+      _selectedRole = null;
+      _remoteRole = null;
       _snapshotSent = false;
       _complete = false;
       _incomingTransfers.clear();
@@ -234,6 +246,10 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
 
   /// Requests a nearby connection to a selected device.
   Future<void> _connect(String deviceId, String deviceName) async {
+    if (_selectedRole == null) {
+      _showError('Select Sender or Receiver before connecting.');
+      return;
+    }
     try {
       final requested = await _nearby.requestConnection(
         'FuelLog',
@@ -261,17 +277,43 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
     }
   }
 
+  bool get _roleSelectionLocked =>
+      _snapshotSent || _complete || (_localReady && _remoteReady);
+
+  void _selectRole(_SyncRole role) {
+    if (_roleSelectionLocked || _selectedRole == role) return;
+    setState(() {
+      _selectedRole = role;
+      _localReady = false;
+      _error = null;
+    });
+  }
+
   /// Confirms that this phone is ready to exchange snapshots.
   Future<void> _confirmSync() async {
     final id = _connectedDeviceId;
+    final role = _selectedRole;
     if (id == null || _localReady) return;
+    if (role == null) {
+      _showError('Select Sender or Receiver before starting the sync.');
+      return;
+    }
+    if (_remoteReady && _remoteRole == role) {
+      _showError(
+        'Both phones selected ${role.name}. One phone must be Sender and the '
+        'other Receiver.',
+      );
+      return;
+    }
     setState(() {
       _localReady = true;
       _error = null;
     });
     try {
-      await _send(id, {'type': 'ready'});
-      if (_remoteReady) await _sendSnapshot(id);
+      await _send(id, {'type': 'ready', 'role': role.name});
+      if (_remoteReady && role == _SyncRole.sender) {
+        await _sendSnapshot(id);
+      }
     } catch (e) {
       if (mounted) setState(() => _localReady = false);
       _showError('Could not start sync: $e');
@@ -306,14 +348,74 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
       }
       switch (message['type']) {
         case 'ready':
-          setState(() => _remoteReady = true);
+          final remoteRole = switch (message['role']) {
+            'sender' => _SyncRole.sender,
+            'receiver' => _SyncRole.receiver,
+            _ => null,
+          };
+          if (remoteRole == null) {
+            throw const FormatException(
+              'The other phone did not select Sender or Receiver.',
+            );
+          }
+          final localRole = _selectedRole;
+          if (localRole == null) {
+            setState(() {
+              _remoteReady = true;
+              _remoteRole = remoteRole;
+              _error = 'Select Sender or Receiver to continue.';
+            });
+            break;
+          }
+          if (localRole == remoteRole) {
+            setState(() {
+              _localReady = false;
+              _remoteReady = true;
+              _remoteRole = remoteRole;
+            });
+            _showError(
+              'Both phones selected ${localRole.name}. One phone must be '
+              'Sender and the other Receiver.',
+            );
+            break;
+          }
+          setState(() {
+            _remoteReady = true;
+            _remoteRole = remoteRole;
+            _error = null;
+          });
           final id = _connectedDeviceId;
-          if (id != null && _localReady) await _sendSnapshot(id);
+          if (id != null && _localReady && localRole == _SyncRole.sender) {
+            await _sendSnapshot(id);
+          }
           await _processCompletedTransfers();
           break;
         case 'snapshot':
           _receiveChunk(message);
           await _processCompletedTransfers();
+          break;
+        case 'complete':
+          final entryCount = message['entryCount'];
+          if (_selectedRole != _SyncRole.sender ||
+              _remoteRole != _SyncRole.receiver ||
+              !_snapshotSent ||
+              entryCount is! int ||
+              entryCount < 0) {
+            throw const FormatException(
+              'Received an invalid sync completion message.',
+            );
+          }
+          if (!mounted) return;
+          setState(() {
+            _complete = true;
+            _error = null;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Data sent successfully ($entryCount entries).'),
+              duration: kAppSnackBarDuration,
+            ),
+          );
           break;
         default:
           throw const FormatException('Unknown nearby sync message');
@@ -325,8 +427,13 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
 
   /// Validates and stores one chunk of an incoming snapshot transfer.
   void _receiveChunk(Map<String, dynamic> message) {
-    if (!_localReady || !_remoteReady) {
-      throw const FormatException('Sync was not confirmed on both phones');
+    if (!_localReady ||
+        !_remoteReady ||
+        _selectedRole != _SyncRole.receiver ||
+        _remoteRole != _SyncRole.sender) {
+      throw const FormatException(
+        'Only the selected Receiver can accept data from a Sender.',
+      );
     }
     final transferId = message['transferId'];
     final index = message['index'];
@@ -358,7 +465,12 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
 
   /// Assembles completed chunks and merges the received snapshot.
   Future<void> _processCompletedTransfers() async {
-    if (!_localReady || !_remoteReady || _complete || _processingTransfer) {
+    if (!_localReady ||
+        !_remoteReady ||
+        _selectedRole != _SyncRole.receiver ||
+        _remoteRole != _SyncRole.sender ||
+        _complete ||
+        _processingTransfer) {
       return;
     }
     for (final transfer in _incomingTransfers.values) {
@@ -372,6 +484,12 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
         final mergedCount = await widget.onSnapshotReceived(
           SyncSnapshot.fromRecords(records),
         );
+        if (!mounted) return;
+        final id = _connectedDeviceId;
+        if (id == null) {
+          throw StateError('The sender disconnected before completion.');
+        }
+        await _send(id, {'type': 'complete', 'entryCount': mergedCount});
         if (!mounted) return;
         setState(() {
           _complete = true;
@@ -392,7 +510,13 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
 
   /// Sends this phone's snapshot as size-limited protocol chunks.
   Future<void> _sendSnapshot(String deviceId) async {
-    if (_snapshotSent || !_localReady || !_remoteReady) return;
+    if (_snapshotSent ||
+        !_localReady ||
+        !_remoteReady ||
+        _selectedRole != _SyncRole.sender ||
+        _remoteRole != _SyncRole.receiver) {
+      return;
+    }
     _snapshotSent = true;
     final records = widget.snapshot().toRecords();
     final chunks = <List<Map<String, dynamic>>>[];
@@ -480,7 +604,61 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'Both phones must be Android and open to this screen to sync data between the two phones. If the connection fails or you cannot click the CONNECT button, lock the phones screen for 1 minute and try again.',
+            'Both phones must be Android and open to this screen. Choose which '
+            'phone sends and which receives; data moves only from Sender to '
+            'Receiver.',
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Choose this phone’s role',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 12,
+                    children: [
+                      ChoiceChip(
+                        avatar: const Icon(Icons.upload_outlined),
+                        label: const Text('Sender'),
+                        selected: _selectedRole == _SyncRole.sender,
+                        onSelected: _roleSelectionLocked
+                            ? null
+                            : (selected) {
+                                if (selected) _selectRole(_SyncRole.sender);
+                              },
+                      ),
+                      ChoiceChip(
+                        avatar: const Icon(Icons.download_outlined),
+                        label: const Text('Receiver'),
+                        selected: _selectedRole == _SyncRole.receiver,
+                        onSelected: _roleSelectionLocked
+                            ? null
+                            : (selected) {
+                                if (selected) _selectRole(_SyncRole.receiver);
+                              },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    switch (_selectedRole) {
+                      _SyncRole.sender =>
+                        'This phone will send its log to the Receiver.',
+                      _SyncRole.receiver =>
+                        'This phone will receive and merge the Sender’s log.',
+                      null => 'Select a role before connecting or syncing.',
+                    },
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 16),
           if (_starting) const Center(child: CircularProgressIndicator()),
@@ -503,7 +681,7 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
                     : _complete
                         ? 'Sync complete'
                         : _remoteReady
-                            ? 'The other phone is ready'
+                            ? 'Other phone selected ${_remoteRole?.name}'
                             : 'Security code: ${_authenticationToken ?? '—'}',
               ),
               trailing: IconButton(
@@ -515,10 +693,16 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
             const SizedBox(height: 8),
             if (_connectionEstablished && !_complete)
               FilledButton.icon(
-                onPressed: _localReady ? null : _confirmSync,
+                onPressed:
+                    _localReady || _selectedRole == null ? null : _confirmSync,
                 icon: const Icon(Icons.sync),
-                label: Text(
-                    _localReady ? 'Waiting for the other phone…' : 'Sync log'),
+                label: Text(_localReady
+                    ? 'Waiting for the other phone…'
+                    : _selectedRole == _SyncRole.sender
+                        ? 'Send log'
+                        : _selectedRole == _SyncRole.receiver
+                            ? 'Receive log'
+                            : 'Select a role'),
               )
             else
               const Text('Disconnect and reconnect to start another sync.'),
@@ -530,7 +714,9 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
                 title: Text(device.value),
                 subtitle: const Text('Nearby'),
                 trailing: TextButton(
-                  onPressed: () => _connect(device.key, device.value),
+                  onPressed: _selectedRole == null
+                      ? null
+                      : () => _connect(device.key, device.value),
                   child: const Text('Connect'),
                 ),
               ),

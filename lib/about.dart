@@ -34,6 +34,7 @@ class _AboutSheetState extends State<AboutSheet> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
+                
                 IconButton(
                   tooltip: 'Close about',
                   onPressed: () => Navigator.of(context).pop(),
