@@ -169,11 +169,12 @@ class _BudgetPieChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final goal = budget;
+    final colors = Theme.of(context).colorScheme;
     final remaining = goal == null || spent >= goal ? 0.0 : goal - spent;
     final progress =
         goal == null ? 0.0 : (spent / goal).clamp(0.0, 1.0).toDouble();
     return Card(
-      color: kNavy800,
+      color: Theme.of(context).colorScheme.surface,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -194,7 +195,11 @@ class _BudgetPieChart extends StatelessWidget {
                   label: '${(progress * 100).round()} percent of budget used',
                   child: CustomPaint(
                     size: const Size.square(180),
-                    painter: _BudgetPiePainter(progress),
+                    painter: _BudgetPiePainter(
+                      progress,
+                      spentColor: colors.primary,
+                      remainingColor: colors.surfaceContainerHighest,
+                    ),
                   ),
                 ),
               ),
@@ -211,12 +216,12 @@ class _BudgetPieChart extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _BudgetLegendRow(
-                            color: kGold,
+                            color: colors.primary,
                             label: 'Spent',
                             amount: spent,
                           ),
                           _BudgetLegendRow(
-                            color: kBlue,
+                            color: colors.surfaceContainerHighest,
                             label: 'Remaining',
                             amount: remaining,
                           ),
@@ -309,12 +314,18 @@ class _BudgetLegendRow extends StatelessWidget {
   }
 }
 
-/// Paints a pie with the used-budget segment in gold and remainder in blue.
+/// Paints a pie using the current theme's primary and elevated-surface colors.
 class _BudgetPiePainter extends CustomPainter {
   final double progress;
+  final Color spentColor;
+  final Color remainingColor;
 
   /// Creates a pie painter for the given fraction of the budget spent.
-  const _BudgetPiePainter(this.progress);
+  const _BudgetPiePainter(
+    this.progress, {
+    required this.spentColor,
+    required this.remainingColor,
+  });
 
   /// Draws the spent and remaining portions of the budget.
   @override
@@ -323,7 +334,7 @@ class _BudgetPiePainter extends CustomPainter {
     canvas.drawCircle(
       bounds.center,
       size.shortestSide / 2,
-      Paint()..color = kBlue,
+      Paint()..color = remainingColor,
     );
     if (progress <= 0) return;
     canvas.drawArc(
@@ -331,12 +342,14 @@ class _BudgetPiePainter extends CustomPainter {
       -math.pi / 2,
       math.pi * 2 * progress,
       true,
-      Paint()..color = kGold,
+      Paint()..color = spentColor,
     );
   }
 
   /// Repaints only when the spending fraction changes.
   @override
   bool shouldRepaint(_BudgetPiePainter oldDelegate) =>
-      oldDelegate.progress != progress;
+      oldDelegate.progress != progress ||
+      oldDelegate.spentColor != spentColor ||
+      oldDelegate.remainingColor != remainingColor;
 }

@@ -24,9 +24,103 @@ FuelEntry _entry({
 void main() {
   test('BBH Bogle is the global text font', () {
     final theme = buildTheme();
+    final lightTheme = buildTheme(isDark: false);
 
     expect(theme.textTheme.bodyMedium?.fontFamily, 'BBH Bogle');
     expect(theme.textTheme.titleLarge?.fontFamily, 'BBH Bogle');
+    expect(theme.brightness, Brightness.dark);
+    expect(lightTheme.brightness, Brightness.light);
+    expect(lightTheme.scaffoldBackgroundColor, const Color(0xFFEDEDE9));
+    expect(lightTheme.colorScheme.surface, const Color(0xFFF5EBE0));
+    expect(lightTheme.colorScheme.primaryContainer, const Color(0xFFD6CCC2));
+    expect(lightTheme.colorScheme.surfaceContainerHighest,
+        const Color(0xFFE3D5CA));
+    expect(lightTheme.colorScheme.primary, const Color(0xFFD5BDAF));
+  });
+
+  test('parses exported CSV entries and quoted fields', () {
+    final entries = parseFuelCsv(
+      'Date,Odometer (mi),Price per gal,Amount (gal),Total cost,'
+      'Distance since last (mi),Efficiency (mi/gal)\r\n'
+      '2026-01-02,1200,3.125,10.5,"\$32.81",,\r\n',
+    );
+
+    expect(entries, hasLength(1));
+    expect(entries.single.date, DateTime(2026, 1, 2));
+    expect(entries.single.odometer, 1200);
+    expect(entries.single.price, 3.125);
+    expect(entries.single.volume, 10.5);
+    expect(entries.single.id, isNotEmpty);
+  });
+
+  test('rejects malformed or invalid CSV rows', () {
+    expect(
+      () => parseFuelCsv('not a FuelLog file'),
+      throwsFormatException,
+    );
+    expect(
+      () => parseFuelCsv(
+        'Date,Odometer (mi),Price per gal,Amount (gal)\n'
+        '2026-01-02,0,3.125,10.5',
+      ),
+      throwsFormatException,
+    );
+  });
+
+  testWidgets('AppBar theme control switches between dark and light',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const FuelLogApp());
+    await tester.pumpAndSettle();
+
+    expect(find.byType(HomePage), findsOneWidget);
+    expect(find.text('Log'), findsOneWidget);
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!.brightness,
+      Brightness.dark,
+    );
+    await tester.tap(find.byTooltip('Switch to light theme'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!.brightness,
+      Brightness.light,
+    );
+    expect(find.byTooltip('Switch to dark theme'), findsOneWidget);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('fuel_theme_is_dark_v1'), isFalse);
+
+    await tester.pumpWidget(
+      const FuelLogApp(key: ValueKey('second-launch')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!.brightness,
+      Brightness.light,
+    );
+    expect(find.byTooltip('Switch to dark theme'), findsOneWidget);
+  });
+
+  testWidgets('new fill-up form shows a pump camera action', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: EntryForm())),
+    );
+
+    expect(find.byTooltip('Take pump photo'), findsOneWidget);
+    expect(find.byIcon(Icons.photo_camera_outlined), findsOneWidget);
+  });
+
+  testWidgets('AppBar menu includes CSV and backup actions', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('CSV and backup actions'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Load CSV'), findsOneWidget);
+    expect(find.text('Save CSV'), findsOneWidget);
+    expect(find.text('Share CSV backup'), findsOneWidget);
   });
 
   test('loads legacy entries without an edit timestamp', () {
@@ -243,10 +337,21 @@ void main() {
     expect(find.byIcon(Icons.list_alt), findsOneWidget);
     expect(find.byIcon(Icons.bar_chart), findsOneWidget);
     expect(find.byIcon(Icons.pie_chart_outline), findsOneWidget);
+    expect(find.byIcon(Icons.photo_library_outlined), findsOneWidget);
+    await tester.tap(find.text('Totals'));
+    await tester.pumpAndSettle();
+    expect(find.text('Totals'), findsOneWidget);
+    expect(find.text('Export CSV'), findsOneWidget);
+    expect(find.text('Load CSV'), findsOneWidget);
+
     await tester.drag(
       find.byKey(const ValueKey('fuel-log-carousel')),
       const Offset(-500, 0),
     );
+    await tester.pumpAndSettle();
+    expect(find.text('Graphs'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Previous page'));
     await tester.pumpAndSettle();
     expect(find.text('Totals'), findsOneWidget);
 
@@ -257,6 +362,17 @@ void main() {
     await tester.tap(find.byTooltip('Previous page'));
     await tester.pumpAndSettle();
     expect(find.text('Totals'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Next page'));
+    await tester.pumpAndSettle();
+    expect(find.text('Graphs'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Next page'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Pump photo gallery is available on Android.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('log entries have a rounded yellow outline', (tester) async {
@@ -269,7 +385,9 @@ void main() {
       'fuel_entries_v1': jsonEncode([entry.toJson()]),
     });
 
-    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpWidget(
+      MaterialApp(theme: buildTheme(), home: const HomePage()),
+    );
     await tester.pumpAndSettle();
 
     final outline = find.byWidgetPredicate(

@@ -1,4 +1,6 @@
 {
     "cmake.sourceDirectory": "C:/Users/tlaw/Documents/code/ject9/log/fuel_log/windows",
+    "cmake.buildDirectory": "${workspaceFolder}/build/cmake-windows",
+    "dart.flutterSdkPath": "C:/flutter",
     "java.configuration.updateBuildConfiguration": "interactive"
 }

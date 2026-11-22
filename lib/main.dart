@@ -7,16 +7,19 @@ import 'package:carousel_slider/carousel_slider.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart' hide XFile;
 
 part 'home_page.dart';
 part 'graphs_page.dart';
 part 'nearby_sync_page.dart';
 part 'shared_widgets.dart';
 part 'entry_form.dart';
+part 'pump_photos.dart';
 
 const MethodChannel _androidNativeChannel =
     MethodChannel('com.example.fuel_log/native');
@@ -35,54 +38,91 @@ const Color kBlue = Color(0xFF003566);
 const Color kGold = Color(0xFFFFC300);
 const Color kYellow = Color(0xFFFFD60A);
 
-/// Builds the application's dark Material 3 theme and shared component styles.
-ThemeData buildTheme() {
-  const scheme = ColorScheme(
-    brightness: Brightness.dark,
-    primary: kGold,
-    onPrimary: kNavy900,
-    primaryContainer: kBlue,
-    onPrimaryContainer: kYellow,
-    secondary: kYellow,
-    onSecondary: kNavy900,
-    secondaryContainer: kBlue,
-    onSecondaryContainer: kYellow,
-    error: Color(0xFFFFB4AB),
-    onError: Color(0xFF690005),
-    errorContainer: Color(0xFF93000A),
-    onErrorContainer: Color(0xFFFFDAD6),
-    surface: kNavy800,
-    onSurface: Color(0xFFEAF0F8),
-    onSurfaceVariant: Color(0xFFA9B8CE),
-    outline: Color(0xFF5F7FA6),
-    outlineVariant: kBlue,
-    surfaceContainerHighest: kBlue,
-    surfaceTint: Colors.transparent,
-  );
+const Color kLightBackground = Color(0xFFEDEDE9);
+const Color kLightSurface = Color(0xFFF5EBE0);
+const Color kLightContainer = Color(0xFFD6CCC2);
+const Color kLightElevated = Color(0xFFE3D5CA);
+const Color kLightPrimary = Color(0xFFD5BDAF);
+const Color kLightText = Color(0xFF3B322D);
+
+/// Builds the application's Material 3 theme and shared component styles.
+ThemeData buildTheme({bool isDark = true}) {
+  final scheme = isDark
+      ? const ColorScheme(
+          brightness: Brightness.dark,
+          primary: kGold,
+          onPrimary: kNavy900,
+          primaryContainer: kBlue,
+          onPrimaryContainer: kYellow,
+          secondary: kYellow,
+          onSecondary: kNavy900,
+          secondaryContainer: kBlue,
+          onSecondaryContainer: kYellow,
+          error: Color(0xFFFFB4AB),
+          onError: Color(0xFF690005),
+          errorContainer: Color(0xFF93000A),
+          onErrorContainer: Color(0xFFFFDAD6),
+          surface: kNavy800,
+          onSurface: Color(0xFFEAF0F8),
+          onSurfaceVariant: Color(0xFFA9B8CE),
+          outline: Color(0xFF5F7FA6),
+          outlineVariant: kBlue,
+          surfaceContainerHighest: kBlue,
+          surfaceTint: Colors.transparent,
+        )
+      : ColorScheme.fromSeed(
+          seedColor: kLightPrimary,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: kLightPrimary,
+          onPrimary: kLightText,
+          primaryContainer: kLightContainer,
+          onPrimaryContainer: kLightText,
+          secondary: kLightContainer,
+          onSecondary: kLightText,
+          secondaryContainer: kLightElevated,
+          onSecondaryContainer: kLightText,
+          surface: kLightSurface,
+          onSurface: kLightText,
+          onSurfaceVariant: const Color(0xFF5C514A),
+          outline: kLightPrimary,
+          outlineVariant: kLightContainer,
+          surfaceDim: kLightBackground,
+          surfaceBright: kLightSurface,
+          surfaceContainerLowest: kLightSurface,
+          surfaceContainerLow: kLightBackground,
+          surfaceContainer: kLightSurface,
+          surfaceContainerHigh: kLightElevated,
+          surfaceContainerHighest: kLightElevated,
+          surfaceTint: Colors.transparent,
+          inverseSurface: kLightText,
+          onInverseSurface: kLightSurface,
+          inversePrimary: kLightElevated,
+        );
 
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
     fontFamily: 'BBH Bogle',
-    scaffoldBackgroundColor: kNavy900,
-    appBarTheme: const AppBarTheme(
-      backgroundColor: kNavy800,
-      foregroundColor: kYellow,
+    scaffoldBackgroundColor: isDark ? kNavy900 : kLightBackground,
+    appBarTheme: AppBarTheme(
+      backgroundColor: isDark ? kNavy800 : kLightContainer,
+      foregroundColor: isDark ? kYellow : kLightText,
       surfaceTintColor: Colors.transparent,
     ),
-    floatingActionButtonTheme: const FloatingActionButtonThemeData(
-      backgroundColor: kGold,
-      foregroundColor: kNavy900,
+    floatingActionButtonTheme: FloatingActionButtonThemeData(
+      backgroundColor: isDark ? kGold : scheme.primary,
+      foregroundColor: isDark ? kNavy900 : scheme.onPrimary,
     ),
-    dividerTheme: const DividerThemeData(color: kBlue),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: kNavy800,
+    dividerTheme: DividerThemeData(color: scheme.outlineVariant),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: scheme.surface,
       surfaceTintColor: Colors.transparent,
     ),
-    snackBarTheme: const SnackBarThemeData(
-      backgroundColor: kBlue,
-      contentTextStyle: TextStyle(color: Colors.white),
-      actionTextColor: kGold,
+    snackBarTheme: SnackBarThemeData(
+      backgroundColor: scheme.inverseSurface,
+      contentTextStyle: const TextStyle(color: Colors.white),
+      actionTextColor: scheme.primary,
     ),
   );
 }
@@ -91,9 +131,74 @@ ThemeData buildTheme() {
 void main() => runApp(const FuelLogApp());
 
 /// Root widget that configures the app's title, theme, and home page.
-class FuelLogApp extends StatelessWidget {
+class FuelLogApp extends StatefulWidget {
   /// Creates the root application widget.
   const FuelLogApp({super.key});
+
+  @override
+  State<FuelLogApp> createState() => _FuelLogAppState();
+}
+
+class _FuelLogAppState extends State<FuelLogApp> {
+  static const _themePreferenceKey = 'fuel_theme_is_dark_v1';
+  final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+  bool _isDarkTheme = true;
+  bool _themeWasChanged = false;
+  Future<void> _themeSaveQueue = Future<void>.value();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThemePreference();
+  }
+
+  Future<void> _loadThemePreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedTheme = prefs.getBool(_themePreferenceKey);
+      if (!mounted || _themeWasChanged || savedTheme == null) return;
+      setState(() => _isDarkTheme = savedTheme);
+    } catch (error, stackTrace) {
+      _reportThemePreferenceError('load', error, stackTrace);
+    }
+  }
+
+  void _toggleTheme() {
+    _themeWasChanged = true;
+    final selectedTheme = !_isDarkTheme;
+    setState(() => _isDarkTheme = selectedTheme);
+    _themeSaveQueue = _themeSaveQueue.then(
+      (_) => _saveThemePreference(selectedTheme),
+    );
+  }
+
+  Future<void> _saveThemePreference(bool isDarkTheme) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!await prefs.setBool(_themePreferenceKey, isDarkTheme)) {
+        throw StateError('The theme preference was not saved.');
+      }
+    } catch (error, stackTrace) {
+      _reportThemePreferenceError('save', error, stackTrace);
+    }
+  }
+
+  void _reportThemePreferenceError(
+    String action,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'FuelLog theme preference',
+      ),
+    );
+    _scaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(content: Text('Could not $action theme preference: $error')),
+    );
+  }
 
   /// Builds the root Material application.
   @override
@@ -101,8 +206,12 @@ class FuelLogApp extends StatelessWidget {
     return MaterialApp(
       title: 'FuelLog',
       debugShowCheckedModeBanner: false,
-      theme: buildTheme(),
-      home: const HomePage(),
+      scaffoldMessengerKey: _scaffoldMessengerKey,
+      theme: buildTheme(isDark: _isDarkTheme),
+      home: HomePage(
+        isDarkTheme: _isDarkTheme,
+        onToggleTheme: _toggleTheme,
+      ),
     );
   }
 }

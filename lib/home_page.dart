@@ -2,25 +2,175 @@ part of 'main.dart';
 
 // ======================= Home =======================
 
+/// Parses the app's exported CSV format into fuel entries.
+List<FuelEntry> parseFuelCsv(String source) {
+  final rows = _decodeCsv(source);
+  if (rows.isEmpty) throw const FormatException('The CSV file is empty.');
+
+  final header = rows.first;
+  header[0] = header[0].replaceFirst('\uFEFF', '').trim();
+  if (header.length < 4 ||
+      header[0] != 'Date' ||
+      !header[1].trim().startsWith('Odometer (') ||
+      !header[2].trim().startsWith('Price per ') ||
+      !header[3].trim().startsWith('Amount (')) {
+    throw const FormatException('This is not a FuelLog CSV file.');
+  }
+
+  final importedAt = DateTime.now();
+  final entries = <FuelEntry>[];
+  for (var index = 1; index < rows.length; index++) {
+    final row = rows[index];
+    if (row.length == 1 && row.first.trim().isEmpty) continue;
+    if (row.length != header.length) {
+      throw FormatException(
+          'Invalid CSV row ${index + 1}: wrong number of columns.');
+    }
+
+    try {
+      final date = DateTime.parse(row[0].trim());
+      final odometer = double.parse(row[1].trim());
+      final price = double.parse(row[2].trim());
+      final volume = double.parse(row[3].trim());
+      if (!odometer.isFinite ||
+          !price.isFinite ||
+          !volume.isFinite ||
+          odometer <= 0 ||
+          price <= 0 ||
+          volume <= 0) {
+        throw const FormatException(
+            'Values must be finite and greater than zero.');
+      }
+      entries.add(
+        FuelEntry(
+          id: '${importedAt.microsecondsSinceEpoch}_$index',
+          date: date,
+          price: price,
+          volume: volume,
+          odometer: odometer,
+          updatedAt: importedAt,
+        ),
+      );
+    } on FormatException catch (error) {
+      throw FormatException('Invalid CSV row ${index + 1}: ${error.message}');
+    }
+  }
+  return entries;
+}
+
+List<List<String>> _decodeCsv(String source) {
+  final rows = <List<String>>[];
+  var row = <String>[];
+  final field = StringBuffer();
+  var inQuotes = false;
+  var afterQuote = false;
+
+  for (var index = 0; index < source.length; index++) {
+    final character = source[index];
+    if (inQuotes) {
+      if (character == '"') {
+        if (index + 1 < source.length && source[index + 1] == '"') {
+          field.write('"');
+          index++;
+        } else {
+          inQuotes = false;
+          afterQuote = true;
+        }
+      } else {
+        field.write(character);
+      }
+      continue;
+    }
+
+    if (character == ',') {
+      row.add(field.toString());
+      field.clear();
+      afterQuote = false;
+    } else if (character == '\r' || character == '\n') {
+      row.add(field.toString());
+      rows.add(row);
+      row = <String>[];
+      field.clear();
+      afterQuote = false;
+      if (character == '\r' &&
+          index + 1 < source.length &&
+          source[index + 1] == '\n') {
+        index++;
+      }
+    } else if (character == '"') {
+      if (field.length != 0 || afterQuote) {
+        throw const FormatException('Invalid quote in CSV file.');
+      }
+      inQuotes = true;
+    } else {
+      if (afterQuote) {
+        throw const FormatException(
+            'Unexpected character after quoted CSV field.');
+      }
+      field.write(character);
+    }
+  }
+
+  if (inQuotes) throw const FormatException('Unclosed quote in CSV file.');
+  if (row.isNotEmpty || field.length != 0 || afterQuote) {
+    row.add(field.toString());
+    rows.add(row);
+  }
+  return rows;
+}
+
 /// Displays the fuel log, totals, CSV export, and nearby sync entry points.
 class HomePage extends StatefulWidget {
+  final bool isDarkTheme;
+  final VoidCallback? onToggleTheme;
+
   /// Creates the home page.
-  const HomePage({super.key});
+  const HomePage({
+    super.key,
+    this.isDarkTheme = true,
+    this.onToggleTheme,
+  });
 
   /// Creates the state and connects it to the HomePage widget.
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
+enum _HomeMenuAction { loadCsv, saveCsv, shareCsv }
+
+class _HomeMenuEntry extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _HomeMenuEntry({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.max,
+        children: [
+          Icon(icon, size: 20),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+}
+
 /// State that loads, edits, calculates, persists, and synchronizes fuel entries.
 class _HomePageState extends State<HomePage> {
   static const _prefsKey = 'fuel_entries_v1';
   static const _deletedPrefsKey = 'fuel_entries_deleted_v1';
-  static const _pageNames = ['Log', 'Totals', 'Graphs'];
+  static const _pageNames = ['Log', 'Totals', 'Graphs', 'Photos'];
   static const _pageIcons = [
     Icons.list_alt,
     Icons.bar_chart,
     Icons.pie_chart_outline,
+    Icons.photo_library_outlined,
   ];
   final CarouselSliderController _carouselController =
       CarouselSliderController();
@@ -174,14 +324,67 @@ class _HomePageState extends State<HomePage> {
   /// Builds the swipeable Log, Totals, and Graphs carousel.
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final selectedPageColor = colorScheme.brightness == Brightness.dark
+        ? colorScheme.primary
+        : colorScheme.onSurface;
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
+        leading: PopupMenuButton<_HomeMenuAction>(
+          tooltip: 'CSV and backup actions',
+          icon: const Icon(Icons.menu),
+          onSelected: (action) {
+            switch (action) {
+              case _HomeMenuAction.loadCsv:
+                unawaited(_importCsv());
+                break;
+              case _HomeMenuAction.saveCsv:
+                unawaited(_exportCsv());
+                break;
+              case _HomeMenuAction.shareCsv:
+                unawaited(_shareCsvBackup());
+                break;
+            }
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: _HomeMenuAction.loadCsv,
+              child: _HomeMenuEntry(
+                icon: Icons.file_upload_outlined,
+                label: 'Load CSV',
+              ),
+            ),
+            const PopupMenuItem(
+              value: _HomeMenuAction.saveCsv,
+              child: _HomeMenuEntry(
+                icon: Icons.file_download_outlined,
+                label: 'Save CSV',
+              ),
+            ),
+            const PopupMenuItem(
+              value: _HomeMenuAction.shareCsv,
+              child: _HomeMenuEntry(
+                icon: Icons.cloud_upload_outlined,
+                label: 'Share CSV backup',
+              ),
+            ),
+          ],
+        ),
         title: const Text(
           'Fuel Fill-ups Log',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            tooltip: widget.isDarkTheme
+                ? 'Switch to light theme'
+                : 'Switch to dark theme',
+            icon: Icon(
+              widget.isDarkTheme ? Icons.light_mode : Icons.dark_mode,
+            ),
+            onPressed: widget.onToggleTheme,
+          ),
           IconButton(
             tooltip: 'Sync nearby',
             icon: const Icon(Icons.sync),
@@ -252,8 +455,9 @@ class _HomePageState extends State<HomePage> {
                                             Icon(
                                               _pageIcons[index],
                                               color: index == _currentPage
-                                                  ? kGold
-                                                  : const Color(0xFF8FA6C4),
+                                                  ? selectedPageColor
+                                                  : colorScheme
+                                                      .onSurfaceVariant,
                                             ),
                                             const SizedBox(height: 2),
                                             Text(
@@ -263,10 +467,9 @@ class _HomePageState extends State<HomePage> {
                                                   .labelSmall
                                                   ?.copyWith(
                                                     color: index == _currentPage
-                                                        ? kGold
-                                                        : const Color(
-                                                            0xFF8FA6C4,
-                                                          ),
+                                                        ? selectedPageColor
+                                                        : colorScheme
+                                                            .onSurfaceVariant,
                                                   ),
                                             ),
                                           ],
@@ -300,10 +503,12 @@ class _HomePageState extends State<HomePage> {
                           final page = switch (index) {
                             0 => _buildLog(),
                             1 => _buildSummary(),
-                            _ => GraphicsPage(
+                            2 => GraphicsPage(
                                 entries: _entries,
                                 distances: _distances,
                               ),
+                            _ =>
+                              PumpPhotosPage(isActive: index == _currentPage),
                           };
                           return SizedBox(
                             width: constraints.maxWidth,
@@ -312,6 +517,7 @@ class _HomePageState extends State<HomePage> {
                         },
                         options: CarouselOptions(
                           height: constraints.maxHeight,
+                          initialPage: 0,
                           viewportFraction: 1,
                           enableInfiniteScroll: false,
                           onPageChanged: (index, _) {
@@ -343,6 +549,82 @@ class _HomePageState extends State<HomePage> {
 
   // ---------------- CSV export ----------------
 
+  /// Opens a CSV file and replaces all active entries after confirmation.
+  Future<void> _importCsv() async {
+    try {
+      final file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(label: 'CSV files', extensions: ['csv']),
+        ],
+      );
+      if (file == null) return;
+
+      final entries = parseFuelCsv(await file.readAsString());
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Replace current data?'),
+          content: Text(
+            'This will replace all current fill-ups with ${entries.length} '
+            'fill-up${entries.length == 1 ? '' : 's'} from ${file.name}.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Replace'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+
+      setState(() {
+        _entries = entries;
+        _deletions = {};
+      });
+      await _save();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Loaded ${entries.length} fill-ups from ${file.name}'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load CSV: $error')),
+      );
+    }
+  }
+
+  Widget _buildCsvActions() => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _exportCsv,
+                icon: const Icon(Icons.file_download_outlined),
+                label: const Text('Export CSV'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _importCsv,
+                icon: const Icon(Icons.file_upload_outlined),
+                label: const Text('Load CSV'),
+              ),
+            ),
+          ],
+        ),
+      );
+
   /// Escapes a CSV field that contains commas, quotes, or line breaks.
   String _csvField(String v) =>
       (v.contains(',') || v.contains('"') || v.contains('\n'))
@@ -353,39 +635,45 @@ class _HomePageState extends State<HomePage> {
   String _plain(double v) =>
       v == v.roundToDouble() ? v.toInt().toString() : v.toString();
 
+  ({String name, Uint8List bytes}) _createCsvExport() {
+    final distances = _distances;
+    final df = DateFormat('yyyy-MM-dd');
+    final rows = <List<String>>[
+      [
+        'Date',
+        'Odometer ($kDistanceUnit)',
+        'Price per $kVolumeUnit',
+        'Amount ($kVolumeUnit)',
+        'Total cost',
+        'Distance since last ($kDistanceUnit)',
+        'Efficiency ($kDistanceUnit/$kVolumeUnit)',
+      ],
+    ];
+    for (final entry in _chronological) {
+      final distance = distances[entry.id];
+      rows.add([
+        df.format(entry.date),
+        _plain(entry.odometer),
+        entry.price.toStringAsFixed(3),
+        entry.volume.toStringAsFixed(3),
+        entry.total.toStringAsFixed(2),
+        distance != null ? _plain(distance) : '',
+        distance != null ? (distance / entry.volume).toStringAsFixed(2) : '',
+      ]);
+    }
+    final csv = rows.map((row) => row.map(_csvField).join(',')).join('\r\n');
+    final name = 'fuel_log_${df.format(DateTime.now())}.csv';
+    return (name: name, bytes: Uint8List.fromList(utf8.encode(csv)));
+  }
+
   /// Exports the chronological fuel log as a CSV file.
   Future<void> _exportCsv() async {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      final distances = _distances;
-      final df = DateFormat('yyyy-MM-dd');
-      final rows = <List<String>>[
-        [
-          'Date',
-          'Odometer ($kDistanceUnit)',
-          'Price per $kVolumeUnit',
-          'Amount ($kVolumeUnit)',
-          'Total cost',
-          'Distance since last ($kDistanceUnit)',
-          'Efficiency ($kDistanceUnit/$kVolumeUnit)',
-        ],
-      ];
-      for (final e in _chronological) {
-        final dist = distances[e.id];
-        rows.add([
-          df.format(e.date),
-          _plain(e.odometer),
-          e.price.toStringAsFixed(3),
-          e.volume.toStringAsFixed(3),
-          e.total.toStringAsFixed(2),
-          dist != null ? _plain(dist) : '',
-          dist != null ? (dist / e.volume).toStringAsFixed(2) : '',
-        ]);
-      }
-      final csv = rows.map((r) => r.map(_csvField).join(',')).join('\r\n');
-      final name = 'fuel_log_${df.format(DateTime.now())}.csv';
-      final bytes = Uint8List.fromList(utf8.encode(csv));
+      final export = _createCsvExport();
+      final name = export.name;
+      final bytes = export.bytes;
       late final String savedLocation;
 
       if (Platform.isAndroid) {
@@ -437,6 +725,41 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _shareCsvBackup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (!Platform.isAndroid) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('CSV backup sharing is available on Android.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      final export = _createCsvExport();
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              export.bytes,
+              mimeType: 'text/csv',
+              name: export.name,
+            ),
+          ],
+          fileNameOverrides: [export.name],
+          subject: 'FuelLog CSV backup',
+          text: 'Choose Google Drive to save a backup of your FuelLog data.',
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not share CSV backup: $error')),
+      );
+    }
+  }
+
   // ---------------- Log tab ----------------
 
   /// Builds the newest-first fill-up list for the Log tab.
@@ -467,16 +790,18 @@ class _HomePageState extends State<HomePage> {
             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
-              color: kYellow,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? kYellow
+                  : kLightPrimary,
               borderRadius: BorderRadius.circular(15),
             ),
             child: Container(
               decoration: BoxDecoration(
-                color: kNavy800,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(13),
               ),
               child: Material(
-                color: kNavy800,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(13),
                 clipBehavior: Clip.antiAlias,
                 child: ListTile(
@@ -504,7 +829,14 @@ class _HomePageState extends State<HomePage> {
 
   /// Builds overall, monthly, and weekly fuel statistics.
   Widget _buildSummary() {
-    if (_entries.isEmpty) return const _EmptyState();
+    if (_entries.isEmpty) {
+      return Column(
+        children: [
+          _buildCsvActions(),
+          const Expanded(child: _EmptyState()),
+        ],
+      );
+    }
     final distances = _distances;
     final months = _monthGroups;
     final overall = Stats.from(_entries, distances);
@@ -527,16 +859,10 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: _exportCsv,
-          icon: const Icon(Icons.file_download_outlined),
-          label: const Text('Export CSV'),
-        ),
-        const SizedBox(height: 8),
+        _buildCsvActions(),
         for (var i = 0; i < months.length; i++)
           Card(
-            color: kNavy800,
+            color: Theme.of(context).colorScheme.surface,
             clipBehavior: Clip.antiAlias,
             child: ExpansionTile(
               initiallyExpanded: i == 0,

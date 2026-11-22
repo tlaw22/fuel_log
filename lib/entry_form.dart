@@ -24,6 +24,7 @@ class EntryForm extends StatefulWidget {
 /// State that validates and submits fuel fill-up form values.
 class _EntryFormState extends State<EntryForm> {
   final _formKey = GlobalKey<FormState>();
+  final _imagePicker = ImagePicker();
   late DateTime _date;
   late final TextEditingController _price;
   late final TextEditingController _volume;
@@ -78,6 +79,90 @@ class _EntryFormState extends State<EntryForm> {
     if (picked != null) setState(() => _date = picked);
   }
 
+  /// Captures a gas-pump photo and saves it to Documents/fuel-logs on Android.
+  Future<void> _takePumpPhoto() async {
+    if (!Platform.isAndroid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pump photos are available on Android.')),
+      );
+      return;
+    }
+
+    try {
+      final photo = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 2048,
+        maxHeight: 2048,
+        imageQuality: 85,
+      );
+      if (photo == null || !mounted) return;
+
+      final shouldSave = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Save pump photo?'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400, maxHeight: 420),
+            child: Image.file(File(photo.path), fit: BoxFit.contain),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Discard'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+      if (shouldSave != true || !mounted) return;
+
+      final sdkInt =
+          await _androidNativeChannel.invokeMethod<int>('androidSdkInt');
+      if (sdkInt == null) {
+        throw StateError('Could not determine the Android version.');
+      }
+      if (sdkInt < 29) {
+        var permission = await Permission.storage.status;
+        if (!permission.isGranted) {
+          permission = await Permission.storage.request();
+        }
+        if (!mounted) return;
+        if (!permission.isGranted) {
+          final message = permission.isPermanentlyDenied
+              ? 'Storage permission is disabled. Enable it in app settings to save photos.'
+              : 'Storage permission is required to save photos.';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+          return;
+        }
+      }
+
+      final name =
+          'fuel_log_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.jpg';
+      final savedLocation =
+          await _androidNativeChannel.invokeMethod<String>('savePumpPhoto', {
+        'name': name,
+        'bytes': await photo.readAsBytes(),
+      });
+      if (savedLocation == null) {
+        throw StateError('Android did not return the saved photo location.');
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Photo saved to $savedLocation')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save pump photo: $error')),
+      );
+    }
+  }
+
   /// Validates the form and returns a created or edited entry to the caller.
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
@@ -117,6 +202,13 @@ class _EntryFormState extends State<EntryForm> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
+                  if (widget.existing == null)
+                    IconButton(
+                      tooltip: 'Take pump photo',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: _takePumpPhoto,
+                      icon: const Icon(Icons.photo_camera_outlined, size: 20),
+                    ),
                   if (widget.existing != null)
                     IconButton(
                       tooltip: 'Delete fill-up',
