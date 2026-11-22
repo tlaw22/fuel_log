@@ -20,10 +20,12 @@ part 'nearby_sync_page.dart';
 part 'shared_widgets.dart';
 part 'entry_form.dart';
 part 'pump_photos.dart';
+part 'about.dart';
 
 const MethodChannel _androidNativeChannel =
     MethodChannel('com.example.fuel_log/native');
 const String _monthlyBudgetPrefsKeyPrefix = 'fuel_monthly_budget_';
+const Duration kAppSnackBarDuration = Duration(seconds: 10);
 
 // ---- Change these to switch units (e.g. 'L' and 'km', and '€') ----
 const String kVolumeUnit = 'gal';
@@ -196,7 +198,10 @@ class _FuelLogAppState extends State<FuelLogApp> {
       ),
     );
     _scaffoldMessengerKey.currentState?.showSnackBar(
-      SnackBar(content: Text('Could not $action theme preference: $error')),
+      SnackBar(
+        content: Text('Could not $action theme preference: $error'),
+        duration: kAppSnackBarDuration,
+      ),
     );
   }
 

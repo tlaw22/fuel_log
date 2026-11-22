@@ -136,7 +136,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-enum _HomeMenuAction { loadCsv, saveCsv, shareCsv }
+enum _HomeMenuAction { loadCsv, saveCsv, shareCsv, about }
 
 class _HomeMenuEntry extends StatelessWidget {
   final IconData icon;
@@ -294,6 +294,16 @@ class _HomePageState extends State<HomePage> {
     await _save();
   }
 
+  /// Opens the About sheet with the bundled README content.
+  Future<void> _showAbout() {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => const AboutSheet(),
+    );
+  }
+
   /// Deletes an entry, records its tombstone, and offers an undo action.
   Future<void> _delete(FuelEntry entry) async {
     final index = _entries.indexWhere((e) => e.id == entry.id);
@@ -307,6 +317,7 @@ class _HomePageState extends State<HomePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Text('Entry deleted'),
+        duration: kAppSnackBarDuration,
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () async {
@@ -332,7 +343,7 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         centerTitle: true,
         leading: PopupMenuButton<_HomeMenuAction>(
-          tooltip: 'CSV and backup actions',
+          tooltip: 'App menu',
           icon: const Icon(Icons.menu),
           onSelected: (action) {
             switch (action) {
@@ -344,6 +355,9 @@ class _HomePageState extends State<HomePage> {
                 break;
               case _HomeMenuAction.shareCsv:
                 unawaited(_shareCsvBackup());
+                break;
+              case _HomeMenuAction.about:
+                unawaited(_showAbout());
                 break;
             }
           },
@@ -367,6 +381,13 @@ class _HomePageState extends State<HomePage> {
               child: _HomeMenuEntry(
                 icon: Icons.cloud_upload_outlined,
                 label: 'Share CSV backup',
+              ),
+            ),
+            const PopupMenuItem(
+              value: _HomeMenuAction.about,
+              child: _HomeMenuEntry(
+                icon: Icons.info_outline,
+                label: 'About',
               ),
             ),
           ],
@@ -404,10 +425,13 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openForm(),
-        icon: const Icon(Icons.add),
-        label: const Text('Fill-up'),
+      floatingActionButton: Transform.translate(
+        offset: const Offset(0, -100),
+        child: FloatingActionButton.extended(
+          onPressed: () => _openForm(),
+          icon: const Icon(Icons.add),
+          label: const Text('Fill-up'),
+        ),
       ),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
@@ -592,12 +616,16 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Loaded ${entries.length} fill-ups from ${file.name}'),
+          duration: kAppSnackBarDuration,
         ),
       );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not load CSV: $error')),
+        SnackBar(
+          content: Text('Could not load CSV: $error'),
+          duration: kAppSnackBarDuration,
+        ),
       );
     }
   }
@@ -692,7 +720,12 @@ class _HomePageState extends State<HomePage> {
             final message = permission.isPermanentlyDenied
                 ? 'Storage permission is disabled. Enable it in app settings to export CSV.'
                 : 'Storage permission is required to export CSV.';
-            messenger.showSnackBar(SnackBar(content: Text(message)));
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text(message),
+                duration: kAppSnackBarDuration,
+              ),
+            );
             return;
           }
         }
@@ -716,11 +749,17 @@ class _HomePageState extends State<HomePage> {
 
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text('CSV saved to $savedLocation')),
+        SnackBar(
+          content: Text('CSV saved to $savedLocation'),
+          duration: kAppSnackBarDuration,
+        ),
       );
     } catch (e) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Could not export CSV: $e')),
+        SnackBar(
+          content: Text('Could not export CSV: $e'),
+          duration: kAppSnackBarDuration,
+        ),
       );
     }
   }
@@ -731,6 +770,7 @@ class _HomePageState extends State<HomePage> {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('CSV backup sharing is available on Android.'),
+          duration: kAppSnackBarDuration,
         ),
       );
       return;
@@ -755,7 +795,10 @@ class _HomePageState extends State<HomePage> {
     } catch (error) {
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text('Could not share CSV backup: $error')),
+        SnackBar(
+          content: Text('Could not share CSV backup: $error'),
+          duration: kAppSnackBarDuration,
+        ),
       );
     }
   }

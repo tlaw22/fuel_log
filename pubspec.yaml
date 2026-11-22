@@ -37,6 +37,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/fonts/OFL.txt
+    - README.md
   fonts:
     - family: Pacifico
       fonts:

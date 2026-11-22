@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuel_log/main.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 FuelEntry _entry({
@@ -115,12 +116,28 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('CSV and backup actions'));
+    await tester.tap(find.byTooltip('App menu'));
     await tester.pumpAndSettle();
 
     expect(find.text('Load CSV'), findsOneWidget);
     expect(find.text('Save CSV'), findsOneWidget);
     expect(find.text('Share CSV backup'), findsOneWidget);
+    expect(find.text('About'), findsOneWidget);
+  });
+
+  testWidgets('About menu displays the bundled README', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('About'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('About Fuel Log'), findsOneWidget);
+    expect(find.textContaining('A Flutter app for tracking fuel fill-ups'),
+        findsOneWidget);
   });
 
   test('loads legacy entries without an edit timestamp', () {
@@ -211,6 +228,10 @@ void main() {
   });
 
   testWidgets('graphs carry forward the previous month budget', (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final now = DateTime.now();
     final previousMonth = DateTime(now.year, now.month - 1);
     final previousBudgetKey =
@@ -243,9 +264,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(TextField), findsOneWidget);
-    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text,
-        '250.00');
+    await tester.tap(find.text('Log my budget data'));
+    await tester.pumpAndSettle();
+    final budgetField = find.byKey(const ValueKey('monthly-budget-input'));
+    expect(tester.widget<TextField>(budgetField).controller!.text, '250.00');
     expect(find.text('20% of \$250.00'), findsOneWidget);
     expect(find.text('28% of \$250.00'), findsOneWidget);
     expect(find.text('Miles driven'), findsOneWidget);
@@ -291,6 +313,10 @@ void main() {
 
   testWidgets('saving a budget stores it for the current month',
       (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     SharedPreferences.setMockInitialValues({});
     final now = DateTime.now();
 
@@ -313,7 +339,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField), '100');
+    await tester.tap(find.text('Log my budget data'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('monthly-budget-input')),
+      '100',
+    );
     await tester.tap(find.text('Save budget'));
     await tester.pumpAndSettle();
 
@@ -323,6 +354,89 @@ void main() {
       100,
     );
     expect(find.text('50% of \$100.00'), findsNWidgets(2));
+    expect(
+      tester.widget<SnackBar>(find.byType(SnackBar)).duration,
+      const Duration(seconds: 10),
+    );
+  });
+
+  testWidgets('monthly travel inputs save and comparison chart collapses',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    final now = DateTime.now();
+    final previousMonth = DateTime(now.year, now.month - 1);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GraphicsPage(
+            distances: const {},
+            entries: [
+              _entry(
+                id: 'current-month',
+                updatedAt: now,
+                price: 4,
+                date: now,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+        find.byKey(const ValueKey('gross-monthly-income-input')), findsNothing);
+    await tester.tap(find.text('Log my budget data'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('gross-monthly-income-input')),
+        findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('gross-monthly-income-input')),
+      '5000',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('monthly-insurance-input')),
+      '150',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('monthly-car-payment-input')),
+      '300',
+    );
+    await tester.tap(find.text('Save monthly details'));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getDouble('fuel_income_${now.year}_${now.month}'),
+      5000,
+    );
+    expect(
+      prefs.getDouble('fuel_insurance_${now.year}_${now.month}'),
+      150,
+    );
+    expect(
+      prefs.getDouble('fuel_car_payment_${now.year}_${now.month}'),
+      300,
+    );
+    expect(find.text('Previous month travel expenses'), findsOneWidget);
+    expect(find.text('Previous month insurance'), findsOneWidget);
+    expect(find.text('\$0.00'), findsWidgets);
+
+    Navigator.of(tester.element(find.byType(GraphicsPage))).pop();
+    await tester.pumpAndSettle();
+    final chartTitle =
+        '${DateFormat.yMMMM().format(now)} vs ${DateFormat.yMMMM().format(previousMonth)}';
+    await tester.tap(find.text(chartTitle));
+    await tester.pumpAndSettle();
+    expect(find.text('Current month travel expenses'), findsNothing);
+    await tester.tap(find.text(chartTitle));
+    await tester.pumpAndSettle();
+    expect(find.text('Current month travel expenses'), findsOneWidget);
   });
 
   testWidgets('carousel swipes and controls navigate between app sections',

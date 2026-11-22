@@ -21,7 +21,15 @@ class GraphicsPage extends StatefulWidget {
 class _GraphicsPageState extends State<GraphicsPage>
     with AutomaticKeepAliveClientMixin<GraphicsPage> {
   final _budgetController = TextEditingController();
+  final _incomeController = TextEditingController();
+  final _insuranceController = TextEditingController();
+  final _carPaymentController = TextEditingController();
   double? _budget;
+  double _grossIncome = 0;
+  double _insurancePayment = 0;
+  double _carPayment = 0;
+  double _previousInsurancePayment = 0;
+  double _previousCarPayment = 0;
 
   /// Keeps the budget editor alive while navigating between carousel pages.
   @override
@@ -31,13 +39,16 @@ class _GraphicsPageState extends State<GraphicsPage>
   @override
   void initState() {
     super.initState();
-    unawaited(_loadBudget());
+    unawaited(_loadMonthlyValues());
   }
 
   /// Releases the budget text controller.
   @override
   void dispose() {
     _budgetController.dispose();
+    _incomeController.dispose();
+    _insuranceController.dispose();
+    _carPaymentController.dispose();
     super.dispose();
   }
 
@@ -45,18 +56,35 @@ class _GraphicsPageState extends State<GraphicsPage>
   String _budgetKey(DateTime month) =>
       '$_monthlyBudgetPrefsKeyPrefix${month.year}_${month.month}';
 
+  String _monthlyValueKey(String name, DateTime month) =>
+      'fuel_${name}_${month.year}_${month.month}';
+
   /// Loads a saved budget for this month, falling back to the previous month.
-  Future<void> _loadBudget() async {
+  Future<void> _loadMonthlyValues() async {
     final prefs = await SharedPreferences.getInstance();
     final now = DateTime.now();
+    final previousMonth = DateTime(now.year, now.month - 1);
     final currentMonthBudget = prefs.getDouble(_budgetKey(now));
-    final previousMonthBudget =
-        prefs.getDouble(_budgetKey(DateTime(now.year, now.month - 1)));
+    final previousMonthBudget = prefs.getDouble(_budgetKey(previousMonth));
     final budget = currentMonthBudget ?? previousMonthBudget;
     if (!mounted) return;
     setState(() {
       _budget = budget;
       _budgetController.text = budget?.toStringAsFixed(2) ?? '';
+      _grossIncome = prefs.getDouble(_monthlyValueKey('income', now)) ?? 0;
+      _insurancePayment =
+          prefs.getDouble(_monthlyValueKey('insurance', now)) ?? 0;
+      _carPayment = prefs.getDouble(_monthlyValueKey('car_payment', now)) ?? 0;
+      _previousInsurancePayment =
+          prefs.getDouble(_monthlyValueKey('insurance', previousMonth)) ?? 0;
+      _previousCarPayment =
+          prefs.getDouble(_monthlyValueKey('car_payment', previousMonth)) ?? 0;
+      _incomeController.text =
+          _grossIncome == 0 ? '' : _grossIncome.toStringAsFixed(2);
+      _insuranceController.text =
+          _insurancePayment == 0 ? '' : _insurancePayment.toStringAsFixed(2);
+      _carPaymentController.text =
+          _carPayment == 0 ? '' : _carPayment.toStringAsFixed(2);
     });
   }
 
@@ -64,12 +92,18 @@ class _GraphicsPageState extends State<GraphicsPage>
   double? _parseBudget() =>
       double.tryParse(_budgetController.text.trim().replaceAll(',', '.'));
 
+  double? _parseAmount(TextEditingController controller) =>
+      double.tryParse(controller.text.trim().replaceAll(',', '.'));
+
   /// Saves the entered budget for the current month.
   Future<void> _saveBudget() async {
     final budget = _parseBudget();
     if (budget == null || budget <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a budget greater than zero.')),
+        const SnackBar(
+          content: Text('Enter a budget greater than zero.'),
+          duration: kAppSnackBarDuration,
+        ),
       );
       return;
     }
@@ -80,11 +114,169 @@ class _GraphicsPageState extends State<GraphicsPage>
     if (!mounted) return;
     setState(() => _budget = budget);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Monthly budget saved')),
+      const SnackBar(
+        content: Text('Monthly budget saved'),
+        duration: kAppSnackBarDuration,
+      ),
     );
   }
 
-  /// Builds the budget input and all-time and monthly spending charts.
+  Future<void> _saveMonthlyValues() async {
+    final income = _parseAmount(_incomeController);
+    final insurance = _parseAmount(_insuranceController);
+    final carPayment = _parseAmount(_carPaymentController);
+    if (income == null ||
+        insurance == null ||
+        carPayment == null ||
+        income < 0 ||
+        insurance < 0 ||
+        carPayment < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter valid non-negative monthly amounts.'),
+          duration: kAppSnackBarDuration,
+        ),
+      );
+      return;
+    }
+
+    final now = DateTime.now();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_monthlyValueKey('income', now), income);
+    await prefs.setDouble(_monthlyValueKey('insurance', now), insurance);
+    await prefs.setDouble(_monthlyValueKey('car_payment', now), carPayment);
+    if (!mounted) return;
+    setState(() {
+      _grossIncome = income;
+      _insurancePayment = insurance;
+      _carPayment = carPayment;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Monthly income and payments saved'),
+        duration: kAppSnackBarDuration,
+      ),
+    );
+  }
+
+  /// Opens the sheet for editing this month's budget and payment details.
+  Future<void> _showBudgetDataSheet() {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) {
+        final mediaQuery = MediaQuery.of(sheetContext);
+        return Padding(
+          padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: mediaQuery.size.height * 0.85,
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Monthly budget data',
+                    style: Theme.of(sheetContext).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    key: const ValueKey('monthly-budget-input'),
+                    controller: _budgetController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: InputDecoration(
+                      labelText: 'Monthly spending budget',
+                      prefixText: '$kCurrency ',
+                      border: const OutlineInputBorder(),
+                      helperText: _budget == null
+                          ? 'Enter a budget to compare spending.'
+                          : 'The previous month’s budget is carried forward.',
+                    ),
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: (_) => _saveBudget(),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      onPressed: _saveBudget,
+                      child: const Text('Save budget'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const ValueKey('gross-monthly-income-input'),
+                    controller: _incomeController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Gross monthly income',
+                      prefixText: '$kCurrency ',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('monthly-insurance-input'),
+                    controller: _insuranceController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Monthly insurance payment',
+                      prefixText: '$kCurrency ',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const ValueKey('monthly-car-payment-input'),
+                    controller: _carPaymentController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Monthly car payment',
+                      prefixText: '$kCurrency ',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton(
+                      onPressed: _saveMonthlyValues,
+                      child: const Text('Save monthly details'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Builds monthly financial inputs and the spending comparison charts.
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -95,41 +287,36 @@ class _GraphicsPageState extends State<GraphicsPage>
         .where((entry) =>
             entry.date.year == now.year && entry.date.month == now.month)
         .toList();
+    final previousMonth = DateTime(now.year, now.month - 1);
+    final previousMonthEntries = widget.entries
+        .where((entry) =>
+            entry.date.year == previousMonth.year &&
+            entry.date.month == previousMonth.month)
+        .toList();
     final monthStats = Stats.from(monthEntries, widget.distances);
-    final budget = _budget;
+    final previousMonthStats =
+        Stats.from(previousMonthEntries, widget.distances);
     final inputBudget = _parseBudget();
     final chartBudget =
         inputBudget != null && inputBudget > 0 ? inputBudget : null;
+    final income = _parseAmount(_incomeController) ?? _grossIncome;
+    final insurance = _parseAmount(_insuranceController) ?? _insurancePayment;
+    final carPayment = _parseAmount(_carPaymentController) ?? _carPayment;
+    final currentTravelExpense = monthStats.spent + insurance + carPayment;
+    final previousTravelExpense = previousMonthStats.spent +
+        _previousInsurancePayment +
+        _previousCarPayment;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
       children: [
-        TextField(
-          controller: _budgetController,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-          ],
-          decoration: InputDecoration(
-            labelText: 'Monthly spending budget',
-            prefixText: '$kCurrency ',
-            border: const OutlineInputBorder(),
-            helperText: budget == null
-                ? 'Enter a budget to compare spending.'
-                : 'The previous month’s budget is carried forward.',
-          ),
-          onChanged: (_) => setState(() {}),
-          onSubmitted: (_) => _saveBudget(),
+        FilledButton.icon(
+          key: const ValueKey('open-budget-data-sheet'),
+          onPressed: _showBudgetDataSheet,
+          icon: const Icon(Icons.edit_note),
+          label: const Text('Log my budget data'),
         ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton(
-            onPressed: _saveBudget,
-            child: const Text('Save budget'),
-          ),
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         _BudgetPieChart(
           title: '${_monthFmt.format(now)} spending',
           spent: monthStats.spent,
@@ -142,6 +329,20 @@ class _GraphicsPageState extends State<GraphicsPage>
           title: 'All-time spending',
           spent: allTimeSpent,
           budget: chartBudget,
+        ),
+        const SizedBox(height: 12),
+        _MonthlyTravelComparisonChart(
+          title:
+              '${_monthFmt.format(now)} vs ${_monthFmt.format(previousMonth)}',
+          currentTotal: currentTravelExpense,
+          previousTotal: previousTravelExpense,
+          grossIncome: income,
+          fuel: monthStats.spent,
+          insurance: insurance,
+          carPayment: carPayment,
+          previousFuel: previousMonthStats.spent,
+          previousInsurance: _previousInsurancePayment,
+          previousCarPayment: _previousCarPayment,
         ),
       ],
     );
@@ -173,6 +374,234 @@ class _BudgetPieChart extends StatelessWidget {
     final remaining = goal == null || spent >= goal ? 0.0 : goal - spent;
     final progress =
         goal == null ? 0.0 : (spent / goal).clamp(0.0, 1.0).toDouble();
+    return _CollapsibleChart(
+      title: title,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (goal == null)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('Set a monthly budget to view progress.'),
+              ),
+            )
+          else ...[
+            Center(
+              child: Semantics(
+                label: '${(progress * 100).round()} percent of budget used',
+                child: CustomPaint(
+                  size: const Size.square(180),
+                  painter: _BudgetPiePainter(
+                    progress,
+                    spentColor: colors.primary,
+                    remainingColor: colors.surfaceContainerHighest,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (goal != null || distance != null)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (goal != null)
+                  Expanded(
+                    flex: distance == null ? 1 : 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _BudgetLegendRow(
+                          color: colors.primary,
+                          label: 'Spent',
+                          amount: spent,
+                        ),
+                        _BudgetLegendRow(
+                          color: colors.surfaceContainerHighest,
+                          label: 'Remaining',
+                          amount: remaining,
+                        ),
+                        if (spent > goal)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Over budget by ${_money.format(spent - goal)}',
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${(spent / goal * 100).round()}% of ${_money.format(goal)}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                if (distance != null) ...[
+                  if (goal != null) const SizedBox(width: 16),
+                  Expanded(
+                    flex: goal == null ? 1 : 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Miles driven',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        Text(
+                          '${_num1.format(distance)} $kDistanceUnit',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Fuel efficiency',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        Text(
+                          fmtEfficiency(efficiency),
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MonthlyTravelComparisonChart extends StatelessWidget {
+  final String title;
+  final double currentTotal;
+  final double previousTotal;
+  final double grossIncome;
+  final double fuel;
+  final double insurance;
+  final double carPayment;
+  final double previousFuel;
+  final double previousInsurance;
+  final double previousCarPayment;
+
+  const _MonthlyTravelComparisonChart({
+    required this.title,
+    required this.currentTotal,
+    required this.previousTotal,
+    required this.grossIncome,
+    required this.fuel,
+    required this.insurance,
+    required this.carPayment,
+    required this.previousFuel,
+    required this.previousInsurance,
+    required this.previousCarPayment,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final total = currentTotal + previousTotal;
+    final currentShare =
+        total == 0 ? 0.0 : (currentTotal / total).clamp(0.0, 1.0).toDouble();
+    return _CollapsibleChart(
+      title: title,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Semantics(
+              label:
+                  'Current month travel expenses compared with the previous month',
+              child: CustomPaint(
+                size: const Size.square(180),
+                painter: _BudgetPiePainter(
+                  currentShare,
+                  spentColor: colors.primary,
+                  remainingColor: colors.surfaceContainerHighest,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _BudgetLegendRow(
+            color: colors.primary,
+            label: 'Current month travel expenses',
+            amount: currentTotal,
+          ),
+          _BudgetLegendRow(
+            color: colors.surfaceContainerHighest,
+            label: 'Previous month travel expenses',
+            amount: previousTotal,
+          ),
+          const Divider(height: 20),
+          _BudgetLegendRow(
+            color: colors.primary,
+            label: 'Fuel this month',
+            amount: fuel,
+          ),
+          _BudgetLegendRow(
+            color: colors.surfaceContainerHighest,
+            label: 'Insurance payment',
+            amount: insurance,
+          ),
+          _BudgetLegendRow(
+            color: colors.secondary,
+            label: 'Car payment',
+            amount: carPayment,
+          ),
+          _BudgetLegendRow(
+            color: colors.primary,
+            label: 'Previous month fuel',
+            amount: previousFuel,
+          ),
+          _BudgetLegendRow(
+            color: colors.surfaceContainerHighest,
+            label: 'Previous month insurance',
+            amount: previousInsurance,
+          ),
+          _BudgetLegendRow(
+            color: colors.secondary,
+            label: 'Previous month car payment',
+            amount: previousCarPayment,
+          ),
+          _BudgetLegendRow(
+            color: colors.primary,
+            label: 'Gross monthly income',
+            amount: grossIncome,
+          ),
+          _BudgetLegendRow(
+            color: colors.surfaceContainerHighest,
+            label: 'Income after travel expenses',
+            amount: grossIncome - currentTotal,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CollapsibleChart extends StatefulWidget {
+  final String title;
+  final Widget child;
+
+  const _CollapsibleChart({
+    required this.title,
+    required this.child,
+  });
+
+  @override
+  State<_CollapsibleChart> createState() => _CollapsibleChartState();
+}
+
+class _CollapsibleChartState extends State<_CollapsibleChart> {
+  bool _expanded = true;
+
+  @override
+  Widget build(BuildContext context) {
     return Card(
       color: Theme.of(context).colorScheme.surface,
       child: Padding(
@@ -180,99 +609,33 @@ class _BudgetPieChart extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            if (goal == null)
-              const Center(
+            Semantics(
+              button: true,
+              expanded: _expanded,
+              child: InkWell(
+                onTap: () => setState(() => _expanded = !_expanded),
                 child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('Set a monthly budget to view progress.'),
-                ),
-              )
-            else ...[
-              Center(
-                child: Semantics(
-                  label: '${(progress * 100).round()} percent of budget used',
-                  child: CustomPaint(
-                    size: const Size.square(180),
-                    painter: _BudgetPiePainter(
-                      progress,
-                      spentColor: colors.primary,
-                      remainingColor: colors.surfaceContainerHighest,
-                    ),
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      Icon(
+                        _expanded ? Icons.expand_less : Icons.expand_more,
+                      ),
+                    ],
                   ),
                 ),
               ),
+            ),
+            if (_expanded) ...[
               const SizedBox(height: 12),
+              widget.child,
             ],
-            if (goal != null || distance != null)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (goal != null)
-                    Expanded(
-                      flex: distance == null ? 1 : 3,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _BudgetLegendRow(
-                            color: colors.primary,
-                            label: 'Spent',
-                            amount: spent,
-                          ),
-                          _BudgetLegendRow(
-                            color: colors.surfaceContainerHighest,
-                            label: 'Remaining',
-                            amount: remaining,
-                          ),
-                          if (spent > goal)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                'Over budget by ${_money.format(spent - goal)}',
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                              ),
-                            ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${(spent / goal * 100).round()}% of ${_money.format(goal)}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  if (distance != null) ...[
-                    if (goal != null) const SizedBox(width: 16),
-                    Expanded(
-                      flex: goal == null ? 1 : 2,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Miles driven',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          Text(
-                            '${_num1.format(distance)} $kDistanceUnit',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Fuel efficiency',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          Text(
-                            fmtEfficiency(efficiency),
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
           ],
         ),
       ),

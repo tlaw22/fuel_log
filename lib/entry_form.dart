@@ -83,7 +83,10 @@ class _EntryFormState extends State<EntryForm> {
   Future<void> _takePumpPhoto() async {
     if (!Platform.isAndroid) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pump photos are available on Android.')),
+        const SnackBar(
+          content: Text('Pump photos are available on Android.'),
+          duration: kAppSnackBarDuration,
+        ),
       );
       return;
     }
@@ -135,7 +138,10 @@ class _EntryFormState extends State<EntryForm> {
               ? 'Storage permission is disabled. Enable it in app settings to save photos.'
               : 'Storage permission is required to save photos.';
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message)),
+            SnackBar(
+              content: Text(message),
+              duration: kAppSnackBarDuration,
+            ),
           );
           return;
         }
@@ -153,12 +159,18 @@ class _EntryFormState extends State<EntryForm> {
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Photo saved to $savedLocation')),
+        SnackBar(
+          content: Text('Photo saved to $savedLocation'),
+          duration: kAppSnackBarDuration,
+        ),
       );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save pump photo: $error')),
+        SnackBar(
+          content: Text('Could not save pump photo: $error'),
+          duration: kAppSnackBarDuration,
+        ),
       );
     }
   }

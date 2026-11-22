@@ -380,7 +380,8 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
               content:
-                  Text('Sync complete — $mergedCount entries on this phone')),
+                  Text('Sync complete — $mergedCount entries on this phone'),
+              duration: kAppSnackBarDuration),
         );
       } finally {
         _processingTransfer = false;
@@ -440,8 +441,12 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
   void _showError(String message) {
     if (!mounted) return;
     setState(() => _error = message);
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: kAppSnackBarDuration,
+      ),
+    );
   }
 
   /// Stops discovery, advertising, and all nearby endpoints when leaving the page.

@@ -45,6 +45,7 @@ The menu in the left side of the AppBar provides:
 - **Save CSV** - Export the chronological fuel log to a CSV file.
 - **Share CSV backup** - Open the Android share dialog. Select Google Drive or
   another backup destination to save the exported CSV.
+- **About** - Read this README from the app.
 
 The **Totals** section also contains direct **Export CSV** and **Load CSV**
 buttons. CSV files include fill-up date, odometer, price, amount, total cost,
@@ -57,6 +58,13 @@ Desktop builds use the system save and file-picker dialogs.
 
 On the Totals tab, select **Export CSV** and choose a destination in the system
 save-file dialog.
+
+## Graphs
+
+The Graphs page saves monthly gross income, insurance, and car payments on this
+device. Its travel-expense comparison includes fuel purchases from the log plus
+the saved insurance and car payments, compared with the previous calendar
+month. Missing previous-month values are shown as zero.
 
 ## Nearby sync (Android)
 

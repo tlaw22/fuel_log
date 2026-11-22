@@ -186,12 +186,18 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
         _photoBytes.remove(photo.id);
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pump photo deleted')),
+        const SnackBar(
+          content: Text('Pump photo deleted'),
+          duration: kAppSnackBarDuration,
+        ),
       );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not delete pump photo: $error')),
+        SnackBar(
+          content: Text('Could not delete pump photo: $error'),
+          duration: kAppSnackBarDuration,
+        ),
       );
     }
   }
