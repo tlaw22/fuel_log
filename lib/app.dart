@@ -5,13 +5,16 @@ import 'dart:math' as math;
 
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart' hide XFile;
+import 'package:url_launcher/url_launcher.dart';
 
 part 'home_page.dart';
 part 'graphs_page.dart';
@@ -19,6 +22,7 @@ part 'shared_widgets.dart';
 part 'entry_form.dart';
 part 'pump_photos.dart';
 part 'about.dart';
+part 'reports.dart';
 part 'stylekit.dart';
 
 const MethodChannel fuelLogNativeChannel =

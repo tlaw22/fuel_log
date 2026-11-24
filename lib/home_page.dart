@@ -138,7 +138,15 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-enum _HomeMenuAction { loadCsv, saveCsv, shareCsv, about, wipeData }
+enum _HomeMenuAction {
+  syncNearby,
+  loadCsv,
+  saveCsv,
+  shareCsv,
+  about,
+  wipeData,
+  reports,
+}
 
 class _HomeMenuEntry extends StatelessWidget {
   final IconData icon;
@@ -352,10 +360,11 @@ class _HomePageState extends State<HomePage> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Wipe all data?'),
         content: const Text(
-          'This permanently deletes all fill-ups, monthly budget data, and '
-          'saved pump photos. Fill-ups can only be restored from a backup '
-          'CSV. Monthly budget data and pump photos are not included in CSV '
-          'backups and cannot be restored.',
+          'This permanently deletes all fill-ups, monthly budget data, '
+          'generated reports, and saved pump photos. Fill-ups can only be '
+          'restored from a backup CSV. Monthly budget data, generated reports, '
+          'and pump photos are not included in CSV backups and cannot be '
+          'restored.',
         ),
         actions: [
           TextButton(
@@ -399,12 +408,18 @@ class _HomePageState extends State<HomePage> {
         if (deletedPhotoCount == null) {
           throw StateError('Android did not confirm pump photo deletion.');
         }
+        final deletedReportCount = await _androidNativeChannel
+            .invokeMethod<int>('deleteAllTextReports');
+        if (deletedReportCount == null) {
+          throw StateError('Android did not confirm report deletion.');
+        }
       }
 
       final prefs = await SharedPreferences.getInstance();
       final keysToRemove = prefs.getKeys().where((key) {
         return key == _prefsKey ||
             key == _deletedPrefsKey ||
+            key == _savedReportsPreferencesKey ||
             _monthlyDataPrefixes.any(key.startsWith);
       }).toList();
       for (final key in keysToRemove) {
@@ -486,6 +501,9 @@ class _HomePageState extends State<HomePage> {
                 ),
                 onSelected: (action) {
                   switch (action) {
+                    case _HomeMenuAction.syncNearby:
+                      _openNearbySync();
+                      break;
                     case _HomeMenuAction.loadCsv:
                       unawaited(_importCsv());
                       break;
@@ -501,9 +519,27 @@ class _HomePageState extends State<HomePage> {
                     case _HomeMenuAction.wipeData:
                       unawaited(_confirmWipeData());
                       break;
+                    case _HomeMenuAction.reports:
+                      _openReports();
+                      break;
                   }
                 },
                 itemBuilder: (context) => [
+                  if (!kIsWeb && widget.nearbySyncPageBuilder != null)
+                    const PopupMenuItem(
+                      value: _HomeMenuAction.syncNearby,
+                      child: _HomeMenuEntry(
+                        icon: Icons.sync,
+                        label: 'Sync nearby',
+                      ),
+                    ),
+                  const PopupMenuItem(
+                    value: _HomeMenuAction.reports,
+                    child: _HomeMenuEntry(
+                      icon: Icons.picture_as_pdf_outlined,
+                      label: 'Reports',
+                    ),
+                  ),
                   const PopupMenuItem(
                     value: _HomeMenuAction.loadCsv,
                     child: _HomeMenuEntry(
@@ -555,24 +591,11 @@ class _HomePageState extends State<HomePage> {
                   ),
                   onPressed: widget.onToggleTheme,
                 ),
-                if (widget.nearbySyncPageBuilder != null)
-                  IconButton(
-                    tooltip: 'Sync nearby',
-                    icon: const Icon(Icons.sync),
-                    onPressed: _loaded
-                        ? () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => widget.nearbySyncPageBuilder!(
-                                  () => SyncSnapshot(
-                                    entries: List.of(_entries),
-                                    deletions: Map.of(_deletions),
-                                  ),
-                                  _mergeReceivedSnapshot,
-                                ),
-                              ),
-                            )
-                        : null,
-                  ),
+                IconButton(
+                  tooltip: 'Reports',
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  onPressed: () => _openReports(),
+                ),
               ],
             )
           : null,
@@ -730,6 +753,33 @@ class _HomePageState extends State<HomePage> {
 
   // ---------------- CSV export ----------------
 
+  void _openNearbySync() {
+    final pageBuilder = widget.nearbySyncPageBuilder;
+    if (pageBuilder == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => pageBuilder(
+          () => SyncSnapshot(
+            entries: List.of(_entries),
+            deletions: Map.of(_deletions),
+          ),
+          _mergeReceivedSnapshot,
+        ),
+      ),
+    );
+  }
+
+  void _openReports() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReportsPage(
+          entries: List.of(_entries),
+          distances: Map.of(_distances),
+        ),
+      ),
+    );
+  }
+
   /// Opens a CSV file and replaces all active entries after confirmation.
   Future<void> _importCsv() async {
     try {
@@ -786,29 +836,6 @@ class _HomePageState extends State<HomePage> {
       );
     }
   }
-
-  Widget _buildCsvActions() => Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _exportCsv,
-                icon: const Icon(Icons.file_download_outlined),
-                label: const Text('Export CSV'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _importCsv,
-                icon: const Icon(Icons.file_upload_outlined),
-                label: const Text('Load CSV'),
-              ),
-            ),
-          ],
-        ),
-      );
 
   /// Escapes a CSV field that contains commas, quotes, or line breaks.
   String _csvField(String v) =>
@@ -1029,14 +1056,7 @@ class _HomePageState extends State<HomePage> {
 
   /// Builds overall, monthly, and weekly fuel statistics.
   Widget _buildSummary() {
-    if (_entries.isEmpty) {
-      return Column(
-        children: [
-          _buildCsvActions(),
-          const Expanded(child: _EmptyState()),
-        ],
-      );
-    }
+    if (_entries.isEmpty) return const _EmptyState();
     final distances = _distances;
     final months = _monthGroups;
     final overall = Stats.from(_entries, distances);
@@ -1059,7 +1079,6 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
         ),
-        _buildCsvActions(),
         for (var i = 0; i < months.length; i++)
           Card(
             color: Theme.of(context).colorScheme.surface,

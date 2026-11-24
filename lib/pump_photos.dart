@@ -7,6 +7,15 @@ class _PumpPhoto {
   const _PumpPhoto({required this.id, required this.name});
 }
 
+class _ExternalPhoto {
+  final XFile file;
+  final Future<Uint8List> bytes;
+
+  _ExternalPhoto(XFile file)
+      : file = file,
+        bytes = file.readAsBytes();
+}
+
 class PumpPhotosPage extends StatefulWidget {
   final bool isActive;
 
@@ -19,6 +28,7 @@ class PumpPhotosPage extends StatefulWidget {
 class _PumpPhotosPageState extends State<PumpPhotosPage> {
   final Map<String, Future<Uint8List>> _photoBytes = {};
   List<_PumpPhoto> _photos = [];
+  List<_ExternalPhoto> _externalPhotos = [];
   bool _isLoading = true;
   String? _error;
 
@@ -36,11 +46,12 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
 
   Future<void> _refresh() async {
     if (!Platform.isAndroid) {
-      setState(() {
-        _photos = [];
-        _isLoading = false;
-        _error = null;
-      });
+      if (!kIsWeb &&
+          (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+        await _chooseExternalPhotos();
+      } else if (mounted) {
+        setState(() => _isLoading = false);
+      }
       return;
     }
 
@@ -111,6 +122,159 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
           }
           return bytes;
         },
+      );
+
+  String? get _defaultPicturesDirectory {
+    final home =
+        Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
+    if (home == null || home.isEmpty) return null;
+    final path = '$home${Platform.pathSeparator}Pictures';
+    return Directory(path).existsSync() ? path : null;
+  }
+
+  bool _isImageFile(FileSystemEntity entity) {
+    if (entity is! File) return false;
+    return const {
+      '.bmp',
+      '.gif',
+      '.heic',
+      '.heif',
+      '.jpeg',
+      '.jpg',
+      '.png',
+      '.webp',
+    }.contains(
+        '.${entity.uri.pathSegments.last.split('.').last.toLowerCase()}');
+  }
+
+  Future<void> _chooseExternalPhotos() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      late final List<XFile> files;
+      if (kIsWeb) {
+        files = await openFiles(
+          acceptedTypeGroups: const [
+            XTypeGroup(
+              label: 'Image files',
+              extensions: [
+                'bmp',
+                'gif',
+                'heic',
+                'heif',
+                'jpeg',
+                'jpg',
+                'png',
+                'webp',
+              ],
+            ),
+          ],
+        );
+      } else if (Platform.isIOS) {
+        files = await ImagePicker().pickMultiImage();
+      } else {
+        final directory = await getDirectoryPath(
+          initialDirectory: _defaultPicturesDirectory,
+          confirmButtonText: 'Open folder',
+        );
+        if (directory == null) {
+          if (mounted) setState(() => _isLoading = false);
+          return;
+        }
+        final entities = await Directory(directory)
+            .list(followLinks: false)
+            .where(_isImageFile)
+            .toList();
+        files =
+            entities.whereType<File>().map((file) => XFile(file.path)).toList();
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _externalPhotos = files.map(_ExternalPhoto.new).toList()
+          ..sort(
+              (first, second) => first.file.name.compareTo(second.file.name));
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'Could not open pictures: $error';
+      });
+    }
+  }
+
+  Future<void> _showExternalPhoto(_ExternalPhoto photo) => showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(photo.file.name,
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          content: SizedBox(
+            width: 420,
+            height: 420,
+            child: FutureBuilder<Uint8List>(
+              future: photo.bytes,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text('Could not open photo: ${snapshot.error}'),
+                  );
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return InteractiveViewer(
+                  child: Image.memory(snapshot.data!, fit: BoxFit.contain),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+
+  Widget _buildExternalPhotoTile(_ExternalPhoto photo) => Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _showExternalPhoto(photo),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: FutureBuilder<Uint8List>(
+                  future: photo.bytes,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const Center(
+                        child: Icon(Icons.broken_image_outlined),
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    return Image.memory(snapshot.data!, fit: BoxFit.cover);
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  photo.file.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
       );
 
   Future<void> _showPhoto(_PumpPhoto photo) => showDialog<void>(
@@ -240,12 +404,7 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!Platform.isAndroid) {
-      return const Center(
-        child: Text('Pump photo gallery is available on Android.'),
-      );
-    }
-
+    if (!Platform.isAndroid) return _buildExternalGallery();
     return Column(
       children: [
         Padding(
@@ -312,6 +471,86 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
                               itemCount: _photos.length,
                               itemBuilder: (context, index) =>
                                   _buildPhotoTile(_photos[index]),
+                            );
+                          },
+                        ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildExternalGallery() {
+    final pickerLabel = kIsWeb
+        ? 'Select Pictures'
+        : Platform.isIOS
+            ? 'Choose Photos'
+            : 'Open Pictures Folder';
+    final emptyMessage = kIsWeb
+        ? 'Select pictures from your device to view them here.'
+        : Platform.isIOS
+            ? 'Choose photos from your library to view them here.'
+            : 'Choose the Pictures folder to browse its images.';
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Pictures',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: _isLoading ? null : _chooseExternalPhotos,
+                icon: const Icon(
+                    kIsWeb ? Icons.image_search_outlined : Icons.folder_open),
+                label: Text(pickerLabel),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(_error!, textAlign: TextAlign.center),
+                      ),
+                    )
+                  : _externalPhotos.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              emptyMessage,
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        )
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            final columns = constraints.maxWidth >= 700
+                                ? 4
+                                : constraints.maxWidth >= 450
+                                    ? 3
+                                    : 2;
+                            return GridView.builder(
+                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 96),
+                              gridDelegate:
+                                  SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: columns,
+                                crossAxisSpacing: 8,
+                                mainAxisSpacing: 8,
+                                childAspectRatio: 0.9,
+                              ),
+                              itemCount: _externalPhotos.length,
+                              itemBuilder: (context, index) =>
+                                  _buildExternalPhotoTile(
+                                      _externalPhotos[index]),
                             );
                           },
                         ),

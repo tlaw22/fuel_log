@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:fuel_log/main.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -132,9 +133,17 @@ void main() {
     expect(pumpIcon.size, 40);
   });
 
-  testWidgets('AppBar menu includes CSV and backup actions', (tester) async {
+  testWidgets('AppBar menu includes sync, reports, CSV, and backup actions',
+      (tester) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomePage(
+          nearbySyncPageBuilder: (snapshot, onSnapshotReceived) =>
+              const Text('Nearby Sync page'),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     final menuFinder = find.byTooltip('App menu');
@@ -152,6 +161,13 @@ void main() {
     await tester.tap(menuFinder);
     await tester.pumpAndSettle();
 
+    expect(find.text('Sync nearby'), findsOneWidget);
+    expect(find.byIcon(Icons.sync), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Sync nearby')).dy,
+      lessThan(tester.getTopLeft(find.text('Reports')).dy),
+    );
+    expect(find.text('Reports'), findsOneWidget);
     expect(find.text('Load CSV'), findsOneWidget);
     expect(find.text('Save CSV'), findsOneWidget);
     expect(find.text('Share CSV backup'), findsOneWidget);
@@ -179,6 +195,9 @@ void main() {
       'fuel_income_${now.year}_${now.month}': 5000.0,
       'fuel_insurance_${now.year}_${now.month}': 150.0,
       'fuel_car_payment_${now.year}_${now.month}': 300.0,
+      'fuel_reports_v1': jsonEncode([
+        {'fileName': 'fuel_log_report_old.txt', 'contents': 'Old report'},
+      ]),
       'fuel_theme_is_dark_v1': false,
     });
 
@@ -194,8 +213,12 @@ void main() {
       find.textContaining('Fill-ups can only be restored from a backup CSV'),
       findsOneWidget,
     );
-    expect(find.textContaining('pump photos are not included in CSV'),
-        findsOneWidget);
+    expect(
+      find.textContaining(
+        'generated reports, and pump photos are not included in CSV',
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
@@ -222,6 +245,7 @@ void main() {
     expect(prefs.getDouble('fuel_insurance_${now.year}_${now.month}'), isNull);
     expect(
         prefs.getDouble('fuel_car_payment_${now.year}_${now.month}'), isNull);
+    expect(prefs.getString('fuel_reports_v1'), isNull);
     expect(prefs.getBool('fuel_theme_is_dark_v1'), isFalse);
     expect(find.text('App data wiped.'), findsOneWidget);
   });
@@ -237,6 +261,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('About Fuel Log'), findsOneWidget);
+    expect(find.text('View project on GitHub'), findsOneWidget);
+    expect(find.text('https://github.com/tlaw22/fuel_log'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is FaIcon &&
+            widget.icon?.codePoint == FontAwesomeIcons.github.codePoint,
+      ),
+      findsOneWidget,
+    );
     expect(find.textContaining('A Flutter app for tracking fuel fill-ups'),
         findsOneWidget);
   });
@@ -570,7 +604,61 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Sync nearby'), findsOneWidget);
+    expect(find.byTooltip('Sync nearby'), findsNothing);
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sync nearby'), findsOneWidget);
+    expect(find.byIcon(Icons.sync), findsOneWidget);
+  });
+
+  testWidgets('Reports button opens the reports list', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Reports'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Generate Report'), findsOneWidget);
+    expect(
+      find.text('No reports yet. Select Generate Report to create one.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('generates, lists, and opens a text report', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final entry = _entry(
+      id: 'report-entry',
+      updatedAt: DateTime(2026, 1, 2),
+      date: DateTime(2026, 1, 2),
+      price: 4,
+      odometer: 120,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReportsPage(entries: [entry], distances: const {}),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Generate Report'));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    final saved = jsonDecode(prefs.getString('fuel_reports_v1')!) as List;
+    expect(saved, hasLength(1));
+    expect(saved.single['contents'], contains('Fuel Log Report'));
+    expect(saved.single['contents'], contains('Fill-ups: 1'));
+    expect(find.textContaining('fuel_log_report_'), findsOneWidget);
+
+    await tester.tap(find.textContaining('fuel_log_report_'));
+    await tester.pumpAndSettle();
+    final report = tester.widget<SelectableText>(find.byType(SelectableText));
+    expect(report.data, contains('Fill-ups: 1'));
+    expect(report.data, contains('Odometer: 120.0 mi'));
+    expect(find.text('Download Report'), findsOneWidget);
+    expect(find.text('Share Report'), findsOneWidget);
   });
 
   testWidgets('nearby sync requires a sender or receiver selection',
@@ -625,8 +713,8 @@ void main() {
     await tester.tap(find.text('Totals'));
     await tester.pumpAndSettle();
     expect(find.text('Totals'), findsOneWidget);
-    expect(find.text('Export CSV'), findsOneWidget);
-    expect(find.text('Load CSV'), findsOneWidget);
+    expect(find.text('Export CSV'), findsNothing);
+    expect(find.text('Load CSV'), findsNothing);
 
     await tester.drag(
       find.byKey(const ValueKey('fuel-log-carousel')),
@@ -650,13 +738,17 @@ void main() {
     await tester.tap(find.byTooltip('Next page'));
     await tester.pumpAndSettle();
     expect(find.text('Graphs'), findsOneWidget);
+  });
 
-    await tester.tap(find.byTooltip('Next page'));
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Pump photo gallery is available on Android.'),
-      findsOneWidget,
+  testWidgets('Photos page offers access to the Pictures folder',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: PumpPhotosPage()),
     );
+    await tester.pump();
+
+    expect(find.text('Pictures'), findsOneWidget);
+    expect(find.text('Open Pictures Folder'), findsOneWidget);
   });
 
   testWidgets('log entries have a rounded yellow outline', (tester) async {

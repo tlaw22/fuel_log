@@ -45,6 +45,27 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
+                "saveTextReport" -> {
+                    val name = call.argument<String>("name")
+                    val bytes = call.argument<ByteArray>("bytes")
+                    if (name == null || bytes == null) {
+                        result.error(
+                            "invalid_arguments",
+                            "A file name and report contents are required.",
+                            null,
+                        )
+                    } else {
+                        try {
+                            result.success(saveTextReportToDocuments(name, bytes))
+                        } catch (error: Exception) {
+                            result.error(
+                                "save_failed",
+                                error.message ?: "Could not save the text report.",
+                                null,
+                            )
+                        }
+                    }
+                }
                 "savePumpPhoto" -> {
                     val name = call.argument<String>("name")
                     val bytes = call.argument<ByteArray>("bytes")
@@ -128,6 +149,17 @@ class MainActivity : FlutterActivity() {
                         )
                     }
                 }
+                "deleteAllTextReports" -> {
+                    try {
+                        result.success(deleteAllTextReports())
+                    } catch (error: Exception) {
+                        result.error(
+                            "delete_failed",
+                            error.message ?: "Could not delete text reports.",
+                            null,
+                        )
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -150,6 +182,36 @@ class MainActivity : FlutterActivity() {
             PackageManager.PERMISSION_GRANTED
         ) {
             throw SecurityException("Storage permission is required to save CSV files.")
+        }
+        val documents = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOCUMENTS,
+        )
+        if (!documents.exists() && !documents.mkdirs()) {
+            throw IOException("Could not create the Documents folder.")
+        }
+        val uniqueName = nextAvailableName(name) { File(documents, it).exists() }
+        val file = File(documents, uniqueName)
+        file.writeBytes(bytes)
+        return file.absolutePath
+    }
+
+    private fun saveTextReportToDocuments(name: String, bytes: ByteArray): String {
+        val relativePath = "${Environment.DIRECTORY_DOCUMENTS}/"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return saveToMediaStore(
+                name,
+                bytes,
+                "text/plain",
+                relativePath,
+                "a text report in Documents",
+                "the text report",
+            )
+        }
+
+        if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            throw SecurityException("Storage permission is required to save reports.")
         }
         val documents = Environment.getExternalStoragePublicDirectory(
             Environment.DIRECTORY_DOCUMENTS,
@@ -282,6 +344,82 @@ class MainActivity : FlutterActivity() {
                 throw IOException("Could not delete saved pump photo $id.")
             }
             deletedCount++
+        }
+        return deletedCount
+    }
+
+    private fun deleteAllTextReports(): Int {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val collection = MediaStore.Files.getContentUri("external")
+            val cursor = contentResolver.query(
+                collection,
+                arrayOf(
+                    MediaStore.MediaColumns._ID,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                ),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND " +
+                    "${MediaStore.MediaColumns.MIME_TYPE} = ?",
+                arrayOf(
+                    "${Environment.DIRECTORY_DOCUMENTS}/",
+                    "text/plain",
+                ),
+                null,
+            ) ?: throw IOException("Could not query saved text reports.")
+            val reports = cursor.use {
+                val idColumn = it.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                val nameColumn =
+                    it.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+                buildList {
+                    while (it.moveToNext()) {
+                        val name = it.getString(nameColumn)
+                        if (name.startsWith("fuel_log_report_") &&
+                            name.endsWith(".txt", ignoreCase = true)
+                        ) {
+                            add(
+                                ContentUris.withAppendedId(
+                                    collection,
+                                    it.getLong(idColumn),
+                                ) to name,
+                            )
+                        }
+                    }
+                }
+            }
+            var deletedCount = 0
+            for ((uri, name) in reports) {
+                val deleted = contentResolver.delete(
+                    uri,
+                    "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND " +
+                        "${MediaStore.MediaColumns.MIME_TYPE} = ?",
+                    arrayOf(
+                        "${Environment.DIRECTORY_DOCUMENTS}/",
+                        "text/plain",
+                    ),
+                )
+                if (deleted != 1) {
+                    throw IOException("Could not delete report $name.")
+                }
+                deletedCount++
+            }
+            return deletedCount
+        }
+
+        val documents = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOCUMENTS,
+        )
+        if (!documents.exists()) return 0
+        val files = documents.listFiles()
+            ?: throw IOException("Could not read the Documents folder.")
+        var deletedCount = 0
+        for (file in files) {
+            if (file.isFile && file.name.startsWith("fuel_log_report_") &&
+                file.extension.equals("txt", ignoreCase = true)
+            ) {
+                if (!file.delete()) {
+                    throw IOException("Could not delete report ${file.name}.")
+                }
+                deletedCount++
+            }
         }
         return deletedCount
     }

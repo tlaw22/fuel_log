@@ -36,8 +36,10 @@ Open the **Photos** carousel section to view saved photos in a grid or open one
 photo at a time. Opening a photo includes a delete button; the app asks for
 confirmation before permanently deleting the selected photo.
 
-Pump-photo capture and gallery management require Android. Windows and other
-supported desktop previews display a platform-unavailable message.
+Pump-photo capture and the saved gallery remain available on Android.
+Desktop builds can browse an image folder starting at Pictures, and Web builds
+can select pictures from the browser file picker. Selected desktop and Web
+images are viewed for the current session and are not copied into FuelLog.
 
 ## CSV data
 
@@ -49,20 +51,25 @@ The menu in the left side of the AppBar provides:
 - **Share CSV backup** - Open the Android share dialog. Select Google Drive or
   another backup destination to save the exported CSV.
 - **About** - Read this README from the app.
+- **Reports** - Generate a plain-text snapshot of the fuel log. Reports appear
+  in a list and open in a readable bottom sheet with download and share
+  actions; Web reports stay in browser storage and can be downloaded or opened
+  in the default mail app, while Android reports are saved in Documents and
+  shared with the system share sheet.
 - **Wipe Data** - After confirmation, permanently remove saved fill-ups,
-  monthly budget data, and pump photos. CSV backups can restore fill-ups only;
-  monthly values and photos are not included in CSV backups.
+  monthly budget data, generated reports, and pump photos. CSV backups can
+  restore fill-ups only; monthly values, reports, and photos are not included
+  in CSV backups.
 
-The **Totals** section also contains direct **Export CSV** and **Load CSV**
-buttons. CSV files include fill-up date, odometer, price, amount, total cost,
-distance since the previous fill-up, and efficiency when available.
+CSV files include fill-up date, odometer, price, amount, total cost, distance
+since the previous fill-up, and efficiency when available.
 
 On Android, saved CSV files are placed in the device's Documents folder.
 Desktop builds use the system save and file-picker dialogs.
 
 ## Export
 
-On the Totals tab, select **Export CSV** and choose a destination in the system
+Use **Save CSV** in the AppBar menu to choose a destination in the system
 save-file dialog.
 
 ## Graphs
@@ -88,24 +95,3 @@ be nearby with the app open. It is not NFC or cloud sync.
 
 Your log stays on this device unless you explicitly use Nearby Sync or export
 or share a CSV backup.
-
-The F-Droid build does not include Nearby Sync or its Google Play Services
-dependency or the Bluetooth/nearby-device permissions. It uses
-`pubspec.fdroid.yaml`, `pubspec.fdroid.lock`, `fdroid/AndroidManifest.xml`, and
-`lib/main_fdroid.dart`; the F-Droid build recipe must stage the alternate
-manifest, lockfile, and Android manifest in place before resolving dependencies.
-In a disposable checkout, build it with:
-
-```sh
-cp pubspec.fdroid.yaml pubspec.yaml
-cp pubspec.fdroid.lock pubspec.lock
-cp fdroid/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
-flutter pub get
-flutter build apk --release --target lib/main_fdroid.dart
-```
-
-## License
-
-FuelLog code is licensed under Apache-2.0. The bundled fonts are separately
-licensed under the SIL Open Font License; see the license files in
-`assets/fonts`.
