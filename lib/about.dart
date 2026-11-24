@@ -1,4 +1,4 @@
-part of 'main.dart';
+part of 'app.dart';
 
 /// Displays the bundled README in a scrollable About bottom sheet.
 class AboutSheet extends StatefulWidget {

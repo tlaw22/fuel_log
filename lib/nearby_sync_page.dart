@@ -1,4 +1,13 @@
-part of 'main.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:nearby_connections/nearby_connections.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+import 'app.dart' show SyncSnapshot, fuelLogNativeChannel, kAppSnackBarDuration;
 
 /// Tracks chunks received for one nearby snapshot transfer.
 class _IncomingTransfer {
@@ -70,7 +79,7 @@ class _NearbySyncPageState extends State<NearbySyncPage> {
       }
 
       final sdkInt =
-          await _androidNativeChannel.invokeMethod<int>('androidSdkInt');
+          await fuelLogNativeChannel.invokeMethod<int>('androidSdkInt');
       if (sdkInt == null) {
         throw StateError('Could not determine the Android version.');
       }

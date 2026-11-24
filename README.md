@@ -85,3 +85,27 @@ conflict resolution relies on the phones' clocks being reasonably accurate.
 
 Nearby sync uses Bluetooth/Wi-Fi peer connectivity and requires both phones to
 be nearby with the app open. It is not NFC or cloud sync.
+
+Your log stays on this device unless you explicitly use Nearby Sync or export
+or share a CSV backup.
+
+The F-Droid build does not include Nearby Sync or its Google Play Services
+dependency or the Bluetooth/nearby-device permissions. It uses
+`pubspec.fdroid.yaml`, `pubspec.fdroid.lock`, `fdroid/AndroidManifest.xml`, and
+`lib/main_fdroid.dart`; the F-Droid build recipe must stage the alternate
+manifest, lockfile, and Android manifest in place before resolving dependencies.
+In a disposable checkout, build it with:
+
+```sh
+cp pubspec.fdroid.yaml pubspec.yaml
+cp pubspec.fdroid.lock pubspec.lock
+cp fdroid/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+flutter pub get
+flutter build apk --release --target lib/main_fdroid.dart
+```
+
+## License
+
+FuelLog code is licensed under Apache-2.0. The bundled fonts are separately
+licensed under the SIL Open Font License; see the license files in
+`assets/fonts`.

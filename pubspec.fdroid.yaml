@@ -1,0 +1,56 @@
+name: fuel_log
+description: A simple fuel log with weekly and monthly totals.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  carousel_slider: ^5.1.2
+  file_selector: ^1.1.0
+  flutter:
+    sdk: flutter
+  image_picker: ^1.2.4
+  intl: ^0.19.0
+  permission_handler: ^13.0.2
+  share_plus: ^13.3.1
+  shared_preferences: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.8
+
+flutter_launcher_icons:
+  image_path: "lib/img/app-icon.jpg"
+  android: true
+  web:
+    generate: true
+  windows:
+    generate: true
+  flutter_launcher_icons: 0.14.4
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  color_dark: "#FFFFFF"
+  android: true
+  ios: false
+  web: true
+  android_12:
+    color: "#FFFFFF"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/OFL.txt
+    - README.md
+  fonts:
+    - family: Pacifico
+      fonts:
+        - asset: assets/fonts/Pacifico-Regular.ttf
+    - family: BBH Bogle
+      fonts:
+        - asset: assets/fonts/BBH-Bogle-Regular.ttf

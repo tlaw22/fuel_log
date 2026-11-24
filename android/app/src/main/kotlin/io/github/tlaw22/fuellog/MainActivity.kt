@@ -1,4 +1,4 @@
-package com.example.fuel_log
+package io.github.tlaw22.fuellog
 
 import android.Manifest
 import android.content.ContentValues
@@ -20,7 +20,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "com.example.fuel_log/native",
+            "io.github.tlaw22.fuellog/native",
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "androidSdkInt" -> result.success(Build.VERSION.SDK_INT)

@@ -1,4 +1,4 @@
-part of 'main.dart';
+part of 'app.dart';
 
 // ======================= Home =======================
 
@@ -123,12 +123,14 @@ List<List<String>> _decodeCsv(String source) {
 class HomePage extends StatefulWidget {
   final bool isDarkTheme;
   final VoidCallback? onToggleTheme;
+  final NearbySyncPageBuilder? nearbySyncPageBuilder;
 
   /// Creates the home page.
   const HomePage({
     super.key,
     this.isDarkTheme = true,
     this.onToggleTheme,
+    this.nearbySyncPageBuilder,
   });
 
   /// Creates the state and connects it to the HomePage widget.
@@ -553,23 +555,24 @@ class _HomePageState extends State<HomePage> {
                   ),
                   onPressed: widget.onToggleTheme,
                 ),
-                IconButton(
-                  tooltip: 'Sync nearby',
-                  icon: const Icon(Icons.sync),
-                  onPressed: _loaded
-                      ? () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => NearbySyncPage(
-                                snapshot: () => SyncSnapshot(
-                                  entries: List.of(_entries),
-                                  deletions: Map.of(_deletions),
+                if (widget.nearbySyncPageBuilder != null)
+                  IconButton(
+                    tooltip: 'Sync nearby',
+                    icon: const Icon(Icons.sync),
+                    onPressed: _loaded
+                        ? () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => widget.nearbySyncPageBuilder!(
+                                  () => SyncSnapshot(
+                                    entries: List.of(_entries),
+                                    deletions: Map.of(_deletions),
+                                  ),
+                                  _mergeReceivedSnapshot,
                                 ),
-                                onSnapshotReceived: _mergeReceivedSnapshot,
                               ),
-                            ),
-                          )
-                      : null,
-                ),
+                            )
+                        : null,
+                  ),
               ],
             )
           : null,

@@ -109,7 +109,9 @@ void main() {
 
     expect(find.text('Loading Local Data'), findsOneWidget);
     expect(
-      find.text('This app does not sell/share/collect any data.'),
+      find.text(
+        'Your data stays on this device unless you choose to sync or export it.',
+      ),
       findsOneWidget,
     );
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
@@ -550,6 +552,25 @@ void main() {
     await tester.tap(find.text(chartTitle));
     await tester.pumpAndSettle();
     expect(find.text('Current month travel expenses'), findsOneWidget);
+  });
+
+  testWidgets('Nearby Sync entry point is optional per build variant',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Sync nearby'), findsNothing);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomePage(
+          nearbySyncPageBuilder: (snapshot, onSnapshotReceived) =>
+              const Text('Nearby Sync page'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Sync nearby'), findsOneWidget);
   });
 
   testWidgets('nearby sync requires a sender or receiver selection',
