@@ -1,4 +1,4 @@
-part of 'app.dart';
+part of '../app.dart';
 
 const String _fuelLogProjectUrl = 'https://github.com/tlaw22/fuel_log';
 
@@ -55,7 +55,6 @@ class _AboutSheetState extends State<AboutSheet> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                
                 IconButton(
                   tooltip: 'Close about',
                   onPressed: () => Navigator.of(context).pop(),

@@ -1,4 +1,4 @@
-part of 'app.dart';
+part of '../app.dart';
 
 const String _savedReportsPreferencesKey = 'fuel_reports_v1';
 
@@ -95,15 +95,26 @@ class _ReportsPageState extends State<ReportsPage> {
         return dateOrder != 0 ? dateOrder : a.odometer.compareTo(b.odometer);
       });
     final totals = Stats.from(entries, widget.distances);
+    final entriesByMonth = <DateTime, List<FuelEntry>>{};
+    for (final entry in entries) {
+      final month = DateTime(entry.date.year, entry.date.month);
+      entriesByMonth.putIfAbsent(month, () => []).add(entry);
+    }
+    final months = entriesByMonth.keys.toList()
+      ..sort((first, second) => second.compareTo(first));
     final lines = <String>[
       'Fuel Log Report',
       'Generated: ${DateFormat.yMMMd().add_jm().format(generatedAt)}',
       '',
       'Fill-ups: ${totals.fills}',
-      'Total spending logged: ${_money.format(totals.spent)}',
       'Total fuel: ${_num1.format(totals.volume)} $kVolumeUnit',
       'Total distance: ${_num1.format(totals.distance)} $kDistanceUnit',
       'Overall efficiency: ${fmtEfficiency(totals.efficiency)}',
+      '',
+      'Monthly summary (up to 2 most recent months):',
+      if (months.isEmpty) 'No monthly data available.',
+      for (final month in months.take(2))
+        _formatMonthlySummary(month, entriesByMonth[month]!),
       '',
       'Fill-up details (oldest to newest):',
     ];
@@ -128,6 +139,16 @@ class _ReportsPageState extends State<ReportsPage> {
       }
     }
     return lines.join('\n');
+  }
+
+  String _formatMonthlySummary(DateTime month, List<FuelEntry> entries) {
+    final totals = Stats.from(entries, widget.distances);
+    return '${_monthFmt.format(month)} | '
+        'Fill-ups: ${totals.fills} | '
+        'Spending: ${_money.format(totals.spent)} | '
+        'Fuel: ${_num1.format(totals.volume)} $kVolumeUnit | '
+        'Distance: ${_num1.format(totals.distance)} $kDistanceUnit | '
+        'Efficiency: ${fmtEfficiency(totals.efficiency)}';
   }
 
   Future<String> _saveReportToDocuments(_SavedFuelReport report) async {

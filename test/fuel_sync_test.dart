@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:fuel_log/main.dart';
@@ -22,6 +23,12 @@ FuelEntry _entry({
       odometer: odometer,
       updatedAt: updatedAt,
     );
+
+Future<void> _pumpStartupToCompletion(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.pump(const Duration(milliseconds: 500));
+  await tester.pumpAndSettle();
+}
 
 void main() {
   test('BBH Bogle is the global text font', () {
@@ -73,7 +80,7 @@ void main() {
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const FuelLogApp());
-    await tester.pumpAndSettle();
+    await _pumpStartupToCompletion(tester);
 
     expect(find.byType(HomePage), findsOneWidget);
     expect(find.text('Log'), findsOneWidget);
@@ -95,7 +102,7 @@ void main() {
     await tester.pumpWidget(
       const FuelLogApp(key: ValueKey('second-launch')),
     );
-    await tester.pumpAndSettle();
+    await _pumpStartupToCompletion(tester);
     expect(
       tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!.brightness,
       Brightness.light,
@@ -111,14 +118,16 @@ void main() {
     expect(find.text('Loading Local Data'), findsOneWidget);
     expect(
       find.text(
-        'Your data stays on this device unless you choose to sync or export it.',
+        'This app does not sell/share/collect any data.',
       ),
       findsOneWidget,
     );
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
     expect(find.textContaining('% loaded'), findsOneWidget);
 
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Loading Local Data'), findsOneWidget);
+    await _pumpStartupToCompletion(tester);
     expect(find.text('Loading Local Data'), findsNothing);
   });
 
@@ -131,20 +140,30 @@ void main() {
     final pumpIcon =
         tester.widget<Icon>(find.byIcon(Icons.photo_camera_outlined));
     expect(pumpIcon.size, 40);
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
-  testWidgets('AppBar menu includes sync, reports, CSV, and backup actions',
+  testWidgets('new fill-up form hides pump camera action on Windows',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: EntryForm())),
+    );
+
+    expect(find.byTooltip('Take pump photo'), findsNothing);
+    expect(find.byIcon(Icons.photo_camera_outlined), findsNothing);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('AppBar menu includes Bluetooth share, reports, CSV, and backups',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(
       MaterialApp(
         home: HomePage(
-          nearbySyncPageBuilder: (snapshot, onSnapshotReceived) =>
-              const Text('Nearby Sync page'),
+          bluetoothSharePageBuilder: (snapshot, onSnapshotReceived) =>
+              const Text('Bluetooth File Sharing'),
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await _pumpStartupToCompletion(tester);
 
     final menuFinder = find.byTooltip('App menu');
     final menuButtonFinder = find.byWidgetPredicate(
@@ -161,10 +180,10 @@ void main() {
     await tester.tap(menuFinder);
     await tester.pumpAndSettle();
 
-    expect(find.text('Sync nearby'), findsOneWidget);
-    expect(find.byIcon(Icons.sync), findsOneWidget);
+    expect(find.text('Bluetooth Share'), findsOneWidget);
+    expect(find.byIcon(Icons.bluetooth), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('Sync nearby')).dy,
+      tester.getTopLeft(find.text('Bluetooth Share')).dy,
       lessThan(tester.getTopLeft(find.text('Reports')).dy),
     );
     expect(find.text('Reports'), findsOneWidget);
@@ -174,6 +193,51 @@ void main() {
     expect(find.text('About'), findsOneWidget);
     expect(find.text('Wipe Data'), findsOneWidget);
   });
+
+  testWidgets('Windows CSV actions open import and save pickers',
+      (tester) async {
+    const fileSelectorChannel =
+        MethodChannel('plugins.flutter.io/file_selector');
+    final calls = <MethodCall>[];
+    final binaryMessenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    binaryMessenger.setMockMethodCallHandler(
+      fileSelectorChannel,
+      (call) async {
+        calls.add(call);
+        return null;
+      },
+    );
+    addTearDown(() {
+      binaryMessenger.setMockMethodCallHandler(fileSelectorChannel, null);
+    });
+
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+
+    Future<void> selectMenuItem(String label) async {
+      await tester.tap(find.byTooltip('App menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    await selectMenuItem('Load CSV');
+    await selectMenuItem('Save CSV');
+    await selectMenuItem('Share CSV backup');
+
+    expect(
+      calls.map((call) => call.method),
+      ['openFile', 'getSavePath', 'getSavePath'],
+    );
+    final saveCalls = calls.where((call) => call.method == 'getSavePath');
+    for (final call in saveCalls) {
+      final arguments = call.arguments as Map<dynamic, dynamic>;
+      expect(arguments['suggestedName'], endsWith('.csv'));
+      expect(arguments['acceptedTypeGroups'], isNotEmpty);
+    }
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('Wipe Data confirms, warns, and clears saved app data',
       (tester) async {
@@ -202,7 +266,7 @@ void main() {
     });
 
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
-    await tester.pumpAndSettle();
+    await _pumpStartupToCompletion(tester);
     expect(find.byType(Dismissible), findsOneWidget);
 
     await tester.tap(find.byTooltip('App menu'));
@@ -253,7 +317,7 @@ void main() {
   testWidgets('About menu displays the bundled README', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
-    await tester.pumpAndSettle();
+    await _pumpStartupToCompletion(tester);
 
     await tester.tap(find.byTooltip('App menu'));
     await tester.pumpAndSettle();
@@ -435,7 +499,7 @@ void main() {
     });
 
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
-    await tester.pumpAndSettle();
+    await _pumpStartupToCompletion(tester);
     await tester.tap(find.byTooltip('Next page'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Next page'));
@@ -588,33 +652,136 @@ void main() {
     expect(find.text('Current month travel expenses'), findsOneWidget);
   });
 
-  testWidgets('Nearby Sync entry point is optional per build variant',
+  testWidgets('Bluetooth sharing entry point is optional per build variant',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('Sync nearby'), findsNothing);
+    await _pumpStartupToCompletion(tester);
+    expect(find.text('Bluetooth Share'), findsNothing);
 
     await tester.pumpWidget(
       MaterialApp(
         home: HomePage(
-          nearbySyncPageBuilder: (snapshot, onSnapshotReceived) =>
-              const Text('Nearby Sync page'),
+          bluetoothSharePageBuilder: (snapshot, onSnapshotReceived) =>
+              const Text('Bluetooth File Sharing'),
+        ),
+      ),
+    );
+    await _pumpStartupToCompletion(tester);
+    expect(find.text('Bluetooth Share'), findsNothing);
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+    expect(find.text('Bluetooth Share'), findsOneWidget);
+    expect(find.byIcon(Icons.bluetooth), findsOneWidget);
+  });
+
+  testWidgets('F-Droid build disables the Bluetooth sharing menu action',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(
+      FuelLogApp(
+        bluetoothShareEnabled: false,
+        bluetoothSharePageBuilder: (snapshot, onSnapshotReceived) =>
+            const Text('Bluetooth File Sharing'),
+      ),
+    );
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.ancestor(
+        of: find.text('Bluetooth Share'),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is PopupMenuItem && !widget.enabled,
+        ),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('pairing guide opens as a slideshow and sharing is disabled',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BtSharePage(
+          enabled: false,
+          snapshot: () => const SyncSnapshot(entries: [], deletions: {}),
+          onSnapshotReceived: (_) async => 0,
         ),
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Sync nearby'), findsNothing);
-    await tester.tap(find.byTooltip('App menu'));
+
+    final beginButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Begin Bluetooth File Sharing'),
+    );
+    expect(beginButton.onPressed, isNull);
+
+    await tester.tap(find.text('How to pair two phones'));
     await tester.pumpAndSettle();
-    expect(find.text('Sync nearby'), findsOneWidget);
-    expect(find.byIcon(Icons.sync), findsOneWidget);
+    expect(find.text('Pair the phones'), findsOneWidget);
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose the paired phone'), findsOneWidget);
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Receive, then send'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(find.text('Pairing guide'), findsNothing);
   });
+
+  testWidgets('paired phone selection enables Bluetooth sharing',
+      (tester) async {
+    const channel = MethodChannel('io.github.tlaw22.fuellog/native');
+    final binaryMessenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    binaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'androidSdkInt':
+          return 30;
+        case 'listPairedBluetoothDevices':
+          return [
+            {'name': 'FuelLog test phone', 'address': '00:11:22:33:44:55'},
+          ];
+        default:
+          return null;
+      }
+    });
+    addTearDown(() {
+      binaryMessenger.setMockMethodCallHandler(channel, null);
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BtSharePage(
+          snapshot: () => const SyncSnapshot(entries: [], deletions: {}),
+          onSnapshotReceived: (_) async => 0,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('FuelLog test phone'));
+    await tester.pumpAndSettle();
+
+    final pairedIndicator = tester.widget<FilledButton>(
+      find.widgetWithText(
+        FilledButton,
+        'Phones are paired: FuelLog test phone',
+      ),
+    );
+    final beginButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Begin Bluetooth File Sharing'),
+    );
+    expect(pairedIndicator.onPressed, isNull);
+    expect(beginButton.onPressed, isNotNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets('Reports button opens the reports list', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
-    await tester.pumpAndSettle();
+    await _pumpStartupToCompletion(tester);
 
     await tester.tap(find.byTooltip('Reports'));
     await tester.pumpAndSettle();
@@ -650,6 +817,11 @@ void main() {
     expect(saved, hasLength(1));
     expect(saved.single['contents'], contains('Fuel Log Report'));
     expect(saved.single['contents'], contains('Fill-ups: 1'));
+    expect(saved.single['contents'], isNot(contains('Total spending logged:')));
+    expect(
+      saved.single['contents'],
+      contains('Monthly summary (up to 2 most recent months):'),
+    );
     expect(find.textContaining('fuel_log_report_'), findsOneWidget);
 
     await tester.tap(find.textContaining('fuel_log_report_'));
@@ -657,15 +829,64 @@ void main() {
     final report = tester.widget<SelectableText>(find.byType(SelectableText));
     expect(report.data, contains('Fill-ups: 1'));
     expect(report.data, contains('Odometer: 120.0 mi'));
+    expect(report.data, contains('January 2026 | Fill-ups: 1'));
+    expect(report.data, isNot(contains('Total spending logged:')));
     expect(find.text('Download Report'), findsOneWidget);
     expect(find.text('Share Report'), findsOneWidget);
   });
 
-  testWidgets('nearby sync requires a sender or receiver selection',
+  testWidgets(
+      'reports include monthly summaries for only the latest two months',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final entries = [
+      _entry(
+        id: 'january-entry',
+        date: DateTime(2026, 1, 15),
+        updatedAt: DateTime(2026, 1, 15),
+        price: 3,
+      ),
+      _entry(
+        id: 'february-entry',
+        date: DateTime(2026, 2, 15),
+        updatedAt: DateTime(2026, 2, 15),
+        price: 3,
+      ),
+      _entry(
+        id: 'march-entry',
+        date: DateTime(2026, 3, 15),
+        updatedAt: DateTime(2026, 3, 15),
+        price: 3,
+      ),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(home: ReportsPage(entries: entries, distances: const {})),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Generate Report'));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    final saved = jsonDecode(prefs.getString('fuel_reports_v1')!) as List;
+    final contents = saved.single['contents'] as String;
+    final monthlySummary =
+        contents.split('Fill-up details (oldest to newest):').first;
+    expect(monthlySummary, contains('March 2026 | Fill-ups: 1'));
+    expect(monthlySummary, contains('February 2026 | Fill-ups: 1'));
+    expect(monthlySummary, isNot(contains('January 2026 |')));
+    expect(contents, contains('Jan 15, 2026'));
+  });
+
+  testWidgets('Bluetooth file sharing requires a sender or receiver role',
       (tester) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: NearbySyncPage(
+        home: BluetoothFileSharingPage(
+          device: const PairedBluetoothDevice(
+            name: 'Paired phone',
+            address: '00:11:22:33:44:55',
+          ),
           snapshot: () => const SyncSnapshot(entries: [], deletions: {}),
           onSnapshotReceived: (_) async => 0,
         ),
@@ -674,7 +895,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text('Select a role before connecting or syncing.'),
+      find.text('Choose a role to begin.'),
       findsOneWidget,
     );
     expect(
@@ -692,7 +913,7 @@ void main() {
       isTrue,
     );
     expect(
-      find.text('This phone will receive and merge the Sender’s log.'),
+      find.text('Wait for sender'),
       findsOneWidget,
     );
   });
@@ -703,7 +924,7 @@ void main() {
     await tester.pumpWidget(
       const MaterialApp(home: HomePage()),
     );
-    await tester.pumpAndSettle();
+    await _pumpStartupToCompletion(tester);
 
     expect(find.text('Log'), findsOneWidget);
     expect(find.byIcon(Icons.list_alt), findsOneWidget);
@@ -740,7 +961,7 @@ void main() {
     expect(find.text('Graphs'), findsOneWidget);
   });
 
-  testWidgets('Photos page offers access to the Pictures folder',
+  testWidgets('Linux Photos page offers access to the Pictures folder',
       (tester) async {
     await tester.pumpWidget(
       const MaterialApp(home: PumpPhotosPage()),
@@ -749,7 +970,30 @@ void main() {
 
     expect(find.text('Pictures'), findsOneWidget);
     expect(find.text('Open Pictures Folder'), findsOneWidget);
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+  testWidgets('Windows Photos page shows the Android-only feature button',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: PumpPhotosPage()),
+    );
+
+    final featureButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Android Only Feature'),
+    );
+    expect(featureButton.onPressed, isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('Android Photos page keeps the saved pump photo gallery',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: PumpPhotosPage()),
+    );
+
+    expect(find.text('Pump Photos'), findsOneWidget);
+    expect(find.byTooltip('Refresh photos'), findsOneWidget);
+    expect(find.text('Android Only Feature'), findsNothing);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets('log entries have a rounded yellow outline', (tester) async {
     final entry = _entry(
@@ -764,7 +1008,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(theme: buildTheme(), home: const HomePage()),
     );
-    await tester.pumpAndSettle();
+    await _pumpStartupToCompletion(tester);
 
     final outline = find.byWidgetPredicate(
       (widget) =>

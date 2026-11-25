@@ -1,4 +1,4 @@
-part of 'app.dart';
+part of '../app.dart';
 
 // ======================= Widgets =======================
 
@@ -40,7 +40,7 @@ class _StartupLoadingScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Your data stays on this device unless you choose to sync or export it.',
+                    'This app does not sell/share/collect any data.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.black87),
                   ),

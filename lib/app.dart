@@ -5,7 +5,8 @@ import 'dart:math' as math;
 
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -16,14 +17,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart' hide XFile;
 import 'package:url_launcher/url_launcher.dart';
 
-part 'home_page.dart';
-part 'graphs_page.dart';
-part 'shared_widgets.dart';
-part 'entry_form.dart';
-part 'pump_photos.dart';
-part 'about.dart';
-part 'reports.dart';
-part 'stylekit.dart';
+part 'pages/home_page.dart';
+part 'pages/graphs_page.dart';
+part 'widgets/shared_widgets.dart';
+part 'widgets/entry_form.dart';
+part 'pages/pump_photos.dart';
+part 'widgets/about.dart';
+part 'pages/reports.dart';
+part 'styles/stylekit.dart';
 
 const MethodChannel fuelLogNativeChannel =
     MethodChannel('io.github.tlaw22.fuellog/native');
@@ -31,7 +32,7 @@ const MethodChannel _androidNativeChannel = fuelLogNativeChannel;
 const String _monthlyBudgetPrefsKeyPrefix = 'fuel_monthly_budget_';
 const Duration kAppSnackBarDuration = Duration(seconds: 10);
 
-typedef NearbySyncPageBuilder = Widget Function(
+typedef BluetoothSharePageBuilder = Widget Function(
   SyncSnapshot Function() snapshot,
   Future<int> Function(SyncSnapshot snapshot) onSnapshotReceived,
 );
@@ -44,12 +45,14 @@ const String kCurrency = '\$';
 
 /// Root widget that configures the app's title, theme, and home page.
 class FuelLogApp extends StatefulWidget {
-  final NearbySyncPageBuilder? nearbySyncPageBuilder;
+  final BluetoothSharePageBuilder? bluetoothSharePageBuilder;
+  final bool bluetoothShareEnabled;
 
   /// Creates the root application widget.
   const FuelLogApp({
     super.key,
-    this.nearbySyncPageBuilder,
+    this.bluetoothSharePageBuilder,
+    this.bluetoothShareEnabled = true,
   });
 
   @override
@@ -131,7 +134,8 @@ class _FuelLogAppState extends State<FuelLogApp> {
       home: HomePage(
         isDarkTheme: _isDarkTheme,
         onToggleTheme: _toggleTheme,
-        nearbySyncPageBuilder: widget.nearbySyncPageBuilder,
+        bluetoothSharePageBuilder: widget.bluetoothSharePageBuilder,
+        bluetoothShareEnabled: widget.bluetoothShareEnabled,
       ),
     );
   }
@@ -194,7 +198,7 @@ class SyncSnapshot {
   /// Creates a snapshot of active entries and deletion timestamps.
   const SyncSnapshot({required this.entries, required this.deletions});
 
-  /// Converts active entries and deletions into records suitable for nearby sync.
+  /// Converts active entries and deletions into Bluetooth-share records.
   List<Map<String, dynamic>> toRecords() => [
         for (final entry in entries) {'kind': 'entry', 'entry': entry.toJson()},
         for (final deletion in deletions.entries)
@@ -205,7 +209,7 @@ class SyncSnapshot {
           },
       ];
 
-  /// Reconstructs a snapshot from a list of nearby sync records.
+  /// Reconstructs a snapshot from Bluetooth-share records.
   factory SyncSnapshot.fromRecords(List<dynamic> records) {
     final entries = <String, FuelEntry>{};
     final deletions = <String, DateTime>{};

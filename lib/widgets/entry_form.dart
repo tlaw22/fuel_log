@@ -1,4 +1,4 @@
-part of 'app.dart';
+part of '../app.dart';
 
 // ======================= Entry form =======================
 
@@ -68,6 +68,9 @@ class _EntryFormState extends State<EntryForm> {
     return (p != null && v != null) ? p * v : null;
   }
 
+  bool get _canTakePumpPhoto =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
   /// Opens a date picker and updates the selected fill-up date.
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -81,15 +84,7 @@ class _EntryFormState extends State<EntryForm> {
 
   /// Captures a gas-pump photo and saves it to Documents/fuel-logs on Android.
   Future<void> _takePumpPhoto() async {
-    if (!Platform.isAndroid) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Pump photos are available on Android.'),
-          duration: kAppSnackBarDuration,
-        ),
-      );
-      return;
-    }
+    if (!_canTakePumpPhoto) return;
 
     try {
       final photo = await _imagePicker.pickImage(
@@ -214,7 +209,7 @@ class _EntryFormState extends State<EntryForm> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
-                  if (widget.existing == null)
+                  if (widget.existing == null && _canTakePumpPhoto)
                     IconButton(
                       tooltip: 'Take pump photo',
                       visualDensity: VisualDensity.compact,

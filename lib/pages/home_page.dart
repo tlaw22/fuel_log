@@ -1,4 +1,4 @@
-part of 'app.dart';
+part of '../app.dart';
 
 // ======================= Home =======================
 
@@ -119,18 +119,20 @@ List<List<String>> _decodeCsv(String source) {
   return rows;
 }
 
-/// Displays the fuel log, totals, CSV export, and nearby sync entry points.
+/// Displays the fuel log, totals, CSV export, and Bluetooth sharing entry point.
 class HomePage extends StatefulWidget {
   final bool isDarkTheme;
   final VoidCallback? onToggleTheme;
-  final NearbySyncPageBuilder? nearbySyncPageBuilder;
+  final BluetoothSharePageBuilder? bluetoothSharePageBuilder;
+  final bool bluetoothShareEnabled;
 
   /// Creates the home page.
   const HomePage({
     super.key,
     this.isDarkTheme = true,
     this.onToggleTheme,
-    this.nearbySyncPageBuilder,
+    this.bluetoothSharePageBuilder,
+    this.bluetoothShareEnabled = true,
   });
 
   /// Creates the state and connects it to the HomePage widget.
@@ -139,7 +141,7 @@ class HomePage extends StatefulWidget {
 }
 
 enum _HomeMenuAction {
-  syncNearby,
+  bluetoothShare,
   loadCsv,
   saveCsv,
   shareCsv,
@@ -175,6 +177,7 @@ class _HomeMenuEntry extends StatelessWidget {
 class _HomePageState extends State<HomePage> {
   static const _prefsKey = 'fuel_entries_v1';
   static const _deletedPrefsKey = 'fuel_entries_deleted_v1';
+  static const _minimumStartupScreenDuration = Duration(milliseconds: 500);
   static const _monthlyDataPrefixes = [
     _monthlyBudgetPrefsKeyPrefix,
     'fuel_income_',
@@ -197,11 +200,20 @@ class _HomePageState extends State<HomePage> {
   String? _loadError;
   int _currentPage = 0;
   int _dataGeneration = 0;
+  late final Future<void> _startupVisibilityDelay;
 
-  /// Loads persisted entries after the first frame of the home page.
+  bool get _isAndroid =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  bool get _isWindowsOrWeb =>
+      kIsWeb || defaultTargetPlatform == TargetPlatform.windows;
+
+  /// Loads persisted entries when the home page initializes.
   @override
   void initState() {
     super.initState();
+    _startupVisibilityDelay =
+        Future<void>.delayed(_minimumStartupScreenDuration);
     _load();
   }
 
@@ -229,10 +241,10 @@ class _HomePageState extends State<HomePage> {
         );
       }
       if (!mounted) return;
-      setState(() {
-        _loadingProgress = 1;
-        _loaded = true;
-      });
+      setState(() => _loadingProgress = 1);
+      await _startupVisibilityDelay;
+      if (!mounted) return;
+      setState(() => _loaded = true);
     } catch (error, stackTrace) {
       if (!mounted) return;
       FlutterError.reportError(
@@ -501,8 +513,8 @@ class _HomePageState extends State<HomePage> {
                 ),
                 onSelected: (action) {
                   switch (action) {
-                    case _HomeMenuAction.syncNearby:
-                      _openNearbySync();
+                    case _HomeMenuAction.bluetoothShare:
+                      _openBluetoothShare();
                       break;
                     case _HomeMenuAction.loadCsv:
                       unawaited(_importCsv());
@@ -525,12 +537,13 @@ class _HomePageState extends State<HomePage> {
                   }
                 },
                 itemBuilder: (context) => [
-                  if (!kIsWeb && widget.nearbySyncPageBuilder != null)
-                    const PopupMenuItem(
-                      value: _HomeMenuAction.syncNearby,
-                      child: _HomeMenuEntry(
-                        icon: Icons.sync,
-                        label: 'Sync nearby',
+                  if (!kIsWeb && widget.bluetoothSharePageBuilder != null)
+                    PopupMenuItem(
+                      enabled: widget.bluetoothShareEnabled,
+                      value: _HomeMenuAction.bluetoothShare,
+                      child: const _HomeMenuEntry(
+                        icon: Icons.bluetooth,
+                        label: 'Bluetooth Share',
                       ),
                     ),
                   const PopupMenuItem(
@@ -753,8 +766,8 @@ class _HomePageState extends State<HomePage> {
 
   // ---------------- CSV export ----------------
 
-  void _openNearbySync() {
-    final pageBuilder = widget.nearbySyncPageBuilder;
+  void _openBluetoothShare() {
+    final pageBuilder = widget.bluetoothSharePageBuilder;
     if (pageBuilder == null) return;
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -888,7 +901,7 @@ class _HomePageState extends State<HomePage> {
       final bytes = export.bytes;
       late final String savedLocation;
 
-      if (Platform.isAndroid) {
+      if (_isAndroid) {
         final sdkInt =
             await _androidNativeChannel.invokeMethod<int>('androidSdkInt');
         if (sdkInt == null) {
@@ -921,14 +934,19 @@ class _HomePageState extends State<HomePage> {
             }) ??
             (throw StateError('Android did not return the saved file path.'));
       } else {
-        final location = await getSaveLocation(suggestedName: name);
+        final location = await getSaveLocation(
+          acceptedTypeGroups: const [
+            XTypeGroup(label: 'CSV files', extensions: ['csv']),
+          ],
+          suggestedName: name,
+        );
         if (location == null) return;
         await XFile.fromData(
           bytes,
           mimeType: 'text/csv',
           name: name,
         ).saveTo(location.path);
-        savedLocation = location.path;
+        savedLocation = kIsWeb ? name : location.path;
       }
 
       if (!mounted) return;
@@ -950,7 +968,11 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _shareCsvBackup() async {
     final messenger = ScaffoldMessenger.of(context);
-    if (!Platform.isAndroid) {
+    if (_isWindowsOrWeb) {
+      await _exportCsv();
+      return;
+    }
+    if (!_isAndroid) {
       messenger.showSnackBar(
         const SnackBar(
           content: Text('CSV backup sharing is available on Android.'),

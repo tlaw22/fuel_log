@@ -1,4 +1,4 @@
-part of 'app.dart';
+part of '../app.dart';
 
 class _PumpPhoto {
   final String id;
@@ -32,6 +32,12 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
   bool _isLoading = true;
   String? _error;
 
+  bool get _isAndroid =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  bool get _isAndroidOnlyPlatform =>
+      kIsWeb || defaultTargetPlatform == TargetPlatform.windows;
+
   @override
   void initState() {
     super.initState();
@@ -45,9 +51,13 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
   }
 
   Future<void> _refresh() async {
-    if (!Platform.isAndroid) {
-      if (!kIsWeb &&
-          (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    if (_isAndroidOnlyPlatform) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+
+    if (!_isAndroid) {
+      if (!kIsWeb && (Platform.isLinux || Platform.isMacOS)) {
         await _chooseExternalPhotos();
       } else if (mounted) {
         setState(() => _isLoading = false);
@@ -404,7 +414,8 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!Platform.isAndroid) return _buildExternalGallery();
+    if (_isAndroidOnlyPlatform) return _buildAndroidOnlyFeature();
+    if (!_isAndroid) return _buildExternalGallery();
     return Column(
       children: [
         Padding(
@@ -478,6 +489,29 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
       ],
     );
   }
+
+  Widget _buildAndroidOnlyFeature() => Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Pump Photos',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+          ),
+          const Expanded(
+            child: Center(
+              child: FilledButton.tonal(
+                onPressed: null,
+                child: Text('Android Only Feature'),
+              ),
+            ),
+          ),
+        ],
+      );
 
   Widget _buildExternalGallery() {
     final pickerLabel = kIsWeb

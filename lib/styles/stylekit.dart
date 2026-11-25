@@ -1,4 +1,4 @@
-part of 'app.dart';
+part of '../app.dart';
 
 // ---- Color palette (coolors.co/palette/000814-001d3d-003566-ffc300-ffd60a) ----
 const Color kNavy900 = Color(0xFF000814);

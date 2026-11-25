@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 
 import 'app.dart';
-import 'nearby_sync_page.dart';
+import 'pages/btshare.dart';
 
 export 'app.dart';
-export 'nearby_sync_page.dart';
+export 'pages/btshare.dart';
 
-/// Starts the full Fuel Log application with Nearby Sync enabled.
+/// Starts the full Fuel Log application with Bluetooth sharing enabled.
 void main() {
   runApp(
     FuelLogApp(
-      nearbySyncPageBuilder: (snapshot, onSnapshotReceived) => NearbySyncPage(
+      bluetoothSharePageBuilder: (snapshot, onSnapshotReceived) => BtSharePage(
         snapshot: snapshot,
         onSnapshotReceived: onSnapshotReceived,
       ),

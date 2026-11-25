@@ -1,21 +1,48 @@
 package io.github.tlaw22.fuellog
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothServerSocket
+import android.bluetooth.BluetoothSocket
 import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.ContentUris
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.Settings
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.plugin.common.MethodChannel
+import java.io.Closeable
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.util.UUID
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
+    private val bluetoothExecutor = Executors.newSingleThreadExecutor()
+    private val bluetoothLock = Any()
+    private var bluetoothTransferGeneration = 0L
+
+    @Volatile
+    private var bluetoothServerSocket: BluetoothServerSocket? = null
+
+    @Volatile
+    private var bluetoothSocket: BluetoothSocket? = null
+
+    private val bluetoothServiceUuid =
+        UUID.fromString("53796e63-4675-4c6f-6742-426c4c6f6701")
+    private val maxBluetoothPayloadBytes = 32 * 1024 * 1024
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(
@@ -24,6 +51,46 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "androidSdkInt" -> result.success(Build.VERSION.SDK_INT)
+                "listPairedBluetoothDevices" -> listPairedBluetoothDevices(result)
+                "openBluetoothSettings" -> openBluetoothSettings(result)
+                "startBluetoothServer" -> {
+                    val address = call.argument<String>("address")
+                    if (address == null) {
+                        result.error(
+                            "invalid_arguments",
+                            "A paired phone address is required.",
+                            null,
+                        )
+                    } else {
+                        startBluetoothServer(address, result)
+                    }
+                }
+                "connectBluetoothDevice" -> {
+                    val address = call.argument<String>("address")
+                    if (address == null) {
+                        result.error(
+                            "invalid_arguments",
+                            "A paired phone address is required.",
+                            null,
+                        )
+                    } else {
+                        connectBluetoothDevice(address, result)
+                    }
+                }
+                "sendBluetoothData" -> {
+                    val bytes = call.argument<ByteArray>("bytes")
+                    if (bytes == null) {
+                        result.error(
+                            "invalid_arguments",
+                            "Bluetooth transfer data is required.",
+                            null,
+                        )
+                    } else {
+                        sendBluetoothData(bytes, result)
+                    }
+                }
+                "receiveBluetoothData" -> receiveBluetoothData(result)
+                "closeBluetoothTransfer" -> closeBluetoothTransfer(result)
                 "saveCsv" -> {
                     val name = call.argument<String>("name")
                     val bytes = call.argument<ByteArray>("bytes")
@@ -163,6 +230,271 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun listPairedBluetoothDevices(result: MethodChannel.Result) {
+        try {
+            val devices = requireBluetoothAdapter().bondedDevices
+                .sortedBy { it.name ?: it.address }
+                .map {
+                    mapOf(
+                        "name" to (it.name ?: "Unknown phone"),
+                        "address" to it.address,
+                    )
+                }
+            result.success(devices)
+        } catch (error: Exception) {
+            result.error(
+                "bluetooth_devices_failed",
+                error.message ?: "Could not read paired Bluetooth phones.",
+                null,
+            )
+        }
+    }
+
+    private fun openBluetoothSettings(result: MethodChannel.Result) {
+        try {
+            startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+            result.success(null)
+        } catch (error: Exception) {
+            result.error(
+                "bluetooth_settings_failed",
+                error.message ?: "Could not open Bluetooth settings.",
+                null,
+            )
+        }
+    }
+
+    private fun requireBluetoothAdapter(): BluetoothAdapter {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            throw SecurityException("Bluetooth permission is required.")
+        }
+        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            ?: throw IllegalStateException("Bluetooth is not supported on this phone.")
+        val adapter = manager.adapter
+            ?: throw IllegalStateException("Bluetooth is not supported on this phone.")
+        if (!adapter.isEnabled) {
+            throw IllegalStateException("Turn on Bluetooth to continue.")
+        }
+        return adapter
+    }
+
+    private fun requireBondedDevice(address: String) =
+        requireBluetoothAdapter().getRemoteDevice(address).also {
+            if (it.bondState != BluetoothDevice.BOND_BONDED) {
+                throw SecurityException("The selected phone is no longer paired.")
+            }
+        }
+
+    private fun startBluetoothServer(
+        expectedAddress: String,
+        result: MethodChannel.Result,
+    ) {
+        val generation = synchronized(bluetoothLock) {
+            ++bluetoothTransferGeneration
+            bluetoothTransferGeneration
+        }
+        bluetoothExecutor.execute {
+            var serverSocket: BluetoothServerSocket? = null
+            try {
+                requireBondedDevice(expectedAddress)
+                val server = requireBluetoothAdapter()
+                    .listenUsingRfcommWithServiceRecord(
+                        "FuelLog",
+                        bluetoothServiceUuid,
+                    )
+                serverSocket = server
+                synchronized(bluetoothLock) {
+                    if (generation != bluetoothTransferGeneration) {
+                        throw IOException("The Bluetooth transfer was cancelled.")
+                    }
+                    bluetoothServerSocket = server
+                }
+                val socket = server.accept()
+                if (!socket.remoteDevice.address.equals(
+                        expectedAddress,
+                        ignoreCase = true,
+                    )
+                ) {
+                    socket.close()
+                    throw SecurityException("A different paired phone connected.")
+                }
+                synchronized(bluetoothLock) {
+                    if (bluetoothServerSocket === server) {
+                        bluetoothServerSocket = null
+                    }
+                    bluetoothSocket = socket
+                }
+                runOnUiThread { result.success(null) }
+            } catch (error: Exception) {
+                synchronized(bluetoothLock) {
+                    if (bluetoothServerSocket === serverSocket) {
+                        bluetoothServerSocket = null
+                    }
+                }
+                runOnUiThread {
+                    result.error(
+                        "bluetooth_server_failed",
+                        error.message ?: "Could not receive a Bluetooth connection.",
+                        null,
+                    )
+                }
+            } finally {
+                closeBluetoothResource(serverSocket, "Bluetooth server")
+            }
+        }
+    }
+
+    private fun connectBluetoothDevice(
+        address: String,
+        result: MethodChannel.Result,
+    ) {
+        val generation = synchronized(bluetoothLock) {
+            ++bluetoothTransferGeneration
+            bluetoothTransferGeneration
+        }
+        bluetoothExecutor.execute {
+            var socket: BluetoothSocket? = null
+            try {
+                val device = requireBondedDevice(address)
+                val connection = device.createRfcommSocketToServiceRecord(
+                    bluetoothServiceUuid,
+                )
+                socket = connection
+                synchronized(bluetoothLock) {
+                    if (generation != bluetoothTransferGeneration) {
+                        throw IOException("The Bluetooth transfer was cancelled.")
+                    }
+                    bluetoothSocket = connection
+                }
+                connection.connect()
+                runOnUiThread { result.success(null) }
+            } catch (error: Exception) {
+                synchronized(bluetoothLock) {
+                    if (bluetoothSocket === socket) bluetoothSocket = null
+                }
+                closeBluetoothResource(socket, "Bluetooth connection")
+                runOnUiThread {
+                    result.error(
+                        "bluetooth_connect_failed",
+                        error.message ?: "Could not connect to the paired phone.",
+                        null,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun sendBluetoothData(
+        bytes: ByteArray,
+        result: MethodChannel.Result,
+    ) {
+        if (bytes.isEmpty() || bytes.size > maxBluetoothPayloadBytes) {
+            result.error(
+                "invalid_payload",
+                "Bluetooth transfer data must be between 1 byte and 32 MB.",
+                null,
+            )
+            return
+        }
+        bluetoothExecutor.execute {
+            try {
+                val socket = synchronized(bluetoothLock) { bluetoothSocket }
+                    ?: throw IllegalStateException("No Bluetooth phone is connected.")
+                val output = DataOutputStream(socket.outputStream)
+                output.writeInt(bytes.size)
+                output.write(bytes)
+                output.flush()
+                runOnUiThread { result.success(null) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error(
+                        "bluetooth_send_failed",
+                        error.message ?: "Could not send Bluetooth data.",
+                        null,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun receiveBluetoothData(result: MethodChannel.Result) {
+        bluetoothExecutor.execute {
+            try {
+                val socket = synchronized(bluetoothLock) { bluetoothSocket }
+                    ?: throw IllegalStateException("No Bluetooth phone is connected.")
+                val input = DataInputStream(socket.inputStream)
+                val size = input.readInt()
+                if (size < 1 || size > maxBluetoothPayloadBytes) {
+                    throw IOException("The received Bluetooth file has an invalid size.")
+                }
+                val bytes = ByteArray(size)
+                input.readFully(bytes)
+                runOnUiThread { result.success(bytes) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error(
+                        "bluetooth_receive_failed",
+                        error.message ?: "Could not receive Bluetooth data.",
+                        null,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun closeBluetoothTransfer(result: MethodChannel.Result) {
+        val resources = synchronized(bluetoothLock) {
+            bluetoothTransferGeneration++
+            val current = bluetoothServerSocket to bluetoothSocket
+            bluetoothServerSocket = null
+            bluetoothSocket = null
+            current
+        }
+        val failures = mutableListOf<String>()
+        try {
+            resources.first?.close()
+        } catch (error: IOException) {
+            failures.add(error.message ?: "Could not stop the Bluetooth listener.")
+        }
+        try {
+            resources.second?.close()
+        } catch (error: IOException) {
+            failures.add(error.message ?: "Could not close the Bluetooth connection.")
+        }
+        if (failures.isEmpty()) {
+            result.success(null)
+        } else {
+            result.error("bluetooth_close_failed", failures.joinToString(" "), null)
+        }
+    }
+
+    private fun closeBluetoothResource(resource: Closeable?, description: String) {
+        try {
+            resource?.close()
+        } catch (error: IOException) {
+            android.util.Log.w(
+                "FuelLogBluetooth",
+                "Could not close $description: ${error.message}",
+            )
+        }
+    }
+
+    override fun onDestroy() {
+        val resources = synchronized(bluetoothLock) {
+            bluetoothTransferGeneration++
+            val current = bluetoothServerSocket to bluetoothSocket
+            bluetoothServerSocket = null
+            bluetoothSocket = null
+            current
+        }
+        closeBluetoothResource(resources.first, "Bluetooth server")
+        closeBluetoothResource(resources.second, "Bluetooth connection")
+        bluetoothExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     private fun saveCsvToDocuments(name: String, bytes: ByteArray): String {

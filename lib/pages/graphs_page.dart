@@ -1,4 +1,4 @@
-part of 'app.dart';
+part of '../app.dart';
 
 /// Shows all-time and current-month spending against an editable monthly budget.
 class GraphicsPage extends StatefulWidget {
