@@ -56,9 +56,6 @@ class _GraphicsPageState extends State<GraphicsPage>
   String _budgetKey(DateTime month) =>
       '$_monthlyBudgetPrefsKeyPrefix${month.year}_${month.month}';
 
-  String _monthlyValueKey(String name, DateTime month) =>
-      'fuel_${name}_${month.year}_${month.month}';
-
   /// Loads a saved budget for this month, falling back to the previous month.
   Future<void> _loadMonthlyValues() async {
     final prefs = await SharedPreferences.getInstance();
@@ -324,10 +321,10 @@ class _GraphicsPageState extends State<GraphicsPage>
     final income = _parseAmount(_incomeController) ?? _grossIncome;
     final insurance = _parseAmount(_insuranceController) ?? _insurancePayment;
     final carPayment = _parseAmount(_carPaymentController) ?? _carPayment;
-    final currentTravelExpense = monthStats.spent + insurance + carPayment;
-    final previousTravelExpense = previousMonthStats.spent +
-        _previousInsurancePayment +
-        _previousCarPayment;
+    final currentTravelExpense =
+        _travelExpense(monthStats.spent, insurance, carPayment);
+    final previousTravelExpense = _travelExpense(previousMonthStats.spent,
+        _previousInsurancePayment, _previousCarPayment);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
@@ -411,94 +408,70 @@ class _BudgetPieChart extends StatelessWidget {
                 child: Text('Set a monthly budget to view progress.'),
               ),
             )
-          else ...[
-            Center(
-              child: Semantics(
-                label: showBudgetPercentage
-                    ? '${(progress * 100).round()} percent of budget used'
-                    : 'Spending compared to budget',
-                child: CustomPaint(
-                  size: const Size.square(180),
-                  painter: _BudgetPiePainter(
-                    progress,
-                    spentColor: colors.primary,
-                    remainingColor: colors.surfaceContainerHighest,
+          else
+            _ChartSummary(
+              progress: progress,
+              semanticsLabel: 'Spent and remaining budget',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _BudgetLegendRow(
+                    color: colors.primary,
+                    label: 'Spent',
+                    amount: spent,
                   ),
-                ),
+                  _BudgetLegendRow(
+                    color: colors.surfaceContainerHighest,
+                    label: 'Remaining',
+                    amount: remaining,
+                  ),
+                  if (spent > goal)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Over budget by ${_money.format(spent - goal)}',
+                        style: TextStyle(color: colors.error),
+                      ),
+                    ),
+                  if (showBudgetPercentage) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '${(spent / goal * 100).round()}% of ${_money.format(goal)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ],
               ),
             ),
+          if (distance != null) ...[
             const SizedBox(height: 12),
-          ],
-          if (goal != null || distance != null)
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (goal != null)
-                  Expanded(
-                    flex: distance == null ? 1 : 3,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _BudgetLegendRow(
-                          color: colors.primary,
-                          label: 'Spent',
-                          amount: spent,
-                        ),
-                        _BudgetLegendRow(
-                          color: colors.surfaceContainerHighest,
-                          label: 'Remaining',
-                          amount: remaining,
-                        ),
-                        if (spent > goal)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Text(
-                              'Over budget by ${_money.format(spent - goal)}',
-                              style: TextStyle(
-                                color: Theme.of(context).colorScheme.error,
-                              ),
-                            ),
-                          ),
-                        if (showBudgetPercentage) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            '${(spent / goal * 100).round()}% of ${_money.format(goal)}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ],
-                    ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Miles driven',
+                          style: Theme.of(context).textTheme.bodySmall),
+                      Text('${_num1.format(distance)} $kDistanceUnit',
+                          style: Theme.of(context).textTheme.titleSmall),
+                    ],
                   ),
-                if (distance != null) ...[
-                  if (goal != null) const SizedBox(width: 16),
-                  Expanded(
-                    flex: goal == null ? 1 : 2,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Miles driven',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        Text(
-                          '${_num1.format(distance)} $kDistanceUnit',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Fuel efficiency',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        Text(
-                          fmtEfficiency(efficiency),
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                      ],
-                    ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Fuel efficiency',
+                          style: Theme.of(context).textTheme.bodySmall),
+                      Text(fmtEfficiency(efficiency),
+                          style: Theme.of(context).textTheme.titleSmall),
+                    ],
                   ),
-                ],
+                ),
               ],
             ),
+          ],
         ],
       ),
     );
@@ -541,30 +514,23 @@ class _MonthlyTravelComparisonChart extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(
-            child: Semantics(
-              label:
-                  'Current month travel expenses compared with the previous month',
-              child: CustomPaint(
-                size: const Size.square(180),
-                painter: _BudgetPiePainter(
-                  currentShare,
-                  spentColor: colors.primary,
-                  remainingColor: colors.surfaceContainerHighest,
+          _ChartSummary(
+            progress: total == 0 ? null : currentShare,
+            semanticsLabel: 'Current and previous month travel expenses',
+            child: Column(
+              children: [
+                _BudgetLegendRow(
+                  color: colors.primary,
+                  label: 'Current month travel expenses',
+                  amount: currentTotal,
                 ),
-              ),
+                _BudgetLegendRow(
+                  color: colors.surfaceContainerHighest,
+                  label: 'Previous month travel expenses',
+                  amount: previousTotal,
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 12),
-          _BudgetLegendRow(
-            color: colors.primary,
-            label: 'Current month travel expenses',
-            amount: currentTotal,
-          ),
-          _BudgetLegendRow(
-            color: colors.surfaceContainerHighest,
-            label: 'Previous month travel expenses',
-            amount: previousTotal,
           ),
           const Divider(height: 20),
           _BudgetLegendRow(
@@ -609,6 +575,84 @@ class _MonthlyTravelComparisonChart extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ChartSummary extends StatelessWidget {
+  final double? progress;
+  final String semanticsLabel;
+  final Widget child;
+
+  const _ChartSummary({
+    required this.progress,
+    required this.semanticsLabel,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final firstPercent = ((progress ?? 0) * 100).round();
+    final percentageText =
+        progress == null ? 'No data' : '$firstPercent% / ${100 - firstPercent}%';
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final chartSize = math.min(120.0, constraints.maxWidth * 0.36);
+        return Row(
+          children: [
+            Expanded(child: child),
+            const SizedBox(width: 12),
+            Semantics(
+              label: progress == null
+                  ? '$semanticsLabel: no data'
+                  : '$semanticsLabel: $firstPercent percent and '
+                      '${100 - firstPercent} percent',
+              child: ExcludeSemantics(
+                child: SizedBox.square(
+                  dimension: chartSize,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CustomPaint(
+                        size: Size.square(chartSize),
+                        painter: _BudgetPiePainter(
+                          progress ?? 0,
+                          spentColor: colors.primary,
+                          remainingColor: colors.surfaceContainerHighest,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: colors.surface,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 3,
+                            ),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                percentageText,
+                                style: Theme.of(context).textTheme.labelMedium,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

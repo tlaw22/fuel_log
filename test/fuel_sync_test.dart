@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -151,6 +152,87 @@ void main() {
     expect(find.byTooltip('Take pump photo'), findsNothing);
     expect(find.byIcon(Icons.photo_camera_outlined), findsNothing);
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('saving a fill-up posts the monthly travel comparison on Android',
+      (tester) async {
+    final now = DateTime.now();
+    final previous = DateTime(now.year, now.month - 1, 15);
+    SharedPreferences.setMockInitialValues({
+      'fuel_entries_v1': jsonEncode([
+        _entry(id: 'previous', updatedAt: previous, price: 2, date: previous)
+            .toJson(),
+      ]),
+      'fuel_insurance_${now.year}_${now.month}': 30.0,
+      'fuel_car_payment_${now.year}_${now.month}': 20.0,
+      'fuel_insurance_${previous.year}_${previous.month}': 5.0,
+      'fuel_car_payment_${previous.year}_${previous.month}': 10.0,
+    });
+    final calls = <MethodCall>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(fuelLogNativeChannel, (call) async {
+      calls.add(call);
+      final prefs = await SharedPreferences.getInstance();
+      expect(jsonDecode(prefs.getString('fuel_entries_v1')!) as List,
+          hasLength(2));
+      return true;
+    });
+    addTearDown(
+        () => messenger.setMockMethodCallHandler(fuelLogNativeChannel, null));
+
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.text('Fill-up'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Fuel price per gal'), '5');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount purchased'), '10');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Odometer reading'), '100');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'showTravelNotification');
+    final args = calls.single.arguments as Map<dynamic, dynamic>;
+    expect(args['currentMonth'], DateFormat.yMMMM().format(now));
+    expect(args['previousMonth'], DateFormat.yMMMM().format(previous));
+    expect(args['currentTotal'], 100.0);
+    expect(args['previousTotal'], 35.0);
+    expect(args['currentAmount'], '\$100.00');
+    expect(args['previousAmount'], '\$35.00');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  testWidgets('denied notification leaves the saved fill-up and reports it',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(
+        fuelLogNativeChannel, (call) async => false);
+    addTearDown(
+        () => messenger.setMockMethodCallHandler(fuelLogNativeChannel, null));
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.text('Fill-up'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Fuel price per gal'), '5');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount purchased'), '10');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Odometer reading'), '100');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Fill-up saved, but notification failed:'),
+        findsOneWidget);
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+        jsonDecode(prefs.getString('fuel_entries_v1')!) as List, hasLength(1));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets('AppBar menu includes Bluetooth share, reports, CSV, and backups',
       (tester) async {
@@ -473,6 +555,79 @@ void main() {
     expect(find.text('150.0 mi'), findsOneWidget);
     expect(find.text('Fuel efficiency'), findsOneWidget);
     expect(find.text('15.0 mi/gal'), findsOneWidget);
+  });
+
+  testWidgets('graph summaries show their pie percentages beside the figures',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final now = DateTime.now();
+    final previousMonth = DateTime(now.year, now.month - 1, 15);
+    SharedPreferences.setMockInitialValues({
+      'fuel_monthly_budget_${now.year}_${now.month}': 250.0,
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GraphicsPage(
+            distances: const {},
+            entries: [
+              _entry(id: 'current', updatedAt: now, price: 5, date: now),
+              _entry(
+                id: 'previous',
+                updatedAt: now,
+                price: 2,
+                date: previousMonth,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('20% / 80%'), findsOneWidget);
+    expect(find.text('28% / 72%'), findsOneWidget);
+    expect(find.text('71% / 29%'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('Spent').first).dx,
+        lessThan(tester.getTopLeft(find.text('20% / 80%')).dx));
+    expect(tester.getTopLeft(find.text('Current month travel expenses')).dx,
+        lessThan(tester.getTopLeft(find.text('71% / 29%')).dx));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('graph pies handle overspending and empty comparisons',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'fuel_monthly_budget_${now.year}_${now.month}': 25.0,
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: GraphicsPage(
+            distances: const {},
+            entries: [
+              _entry(id: 'old', updatedAt: now, price: 5, date: DateTime(2020)),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('0% / 100%'), findsOneWidget);
+    expect(find.text('100% / 0%'), findsOneWidget);
+    expect(find.text('Over budget by \$25.00'), findsOneWidget);
+    expect(find.text('No data'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('home graphs page shows monthly miles and fuel efficiency',
@@ -1034,4 +1189,146 @@ void main() {
     expect(find.descendant(of: outline, matching: find.byType(ListTile)),
         findsOneWidget);
   });
+
+  testWidgets('loaded duplicate odometers are marked and update on deletion',
+      (tester) async {
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'fuel_entries_v1': jsonEncode([
+        _entry(id: 'a', updatedAt: now, price: 2, odometer: 100).toJson(),
+        _entry(id: 'b', updatedAt: now, price: 3, odometer: 100).toJson(),
+        _entry(id: 'c', updatedAt: now, price: 4, odometer: 100.04).toJson(),
+      ]),
+    });
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+
+    Finder badgeFor(String id) => find.descendant(
+          of: find.byKey(ValueKey(id)),
+          matching: find.text('DUPLICATE'),
+        );
+    expect(badgeFor('a'), findsOneWidget);
+    expect(badgeFor('b'), findsOneWidget);
+    expect(badgeFor('c'), findsNothing);
+    await tester.drag(find.byKey(const ValueKey('a')), const Offset(-600, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('DUPLICATE'), findsNothing);
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(find.text('DUPLICATE'), findsNWidgets(2));
+  });
+
+  testWidgets('new and edited fill-ups update duplicate labels',
+      (tester) async {
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'fuel_entries_v1': jsonEncode([
+        _entry(id: 'existing', updatedAt: now, price: 2, odometer: 100)
+            .toJson(),
+      ]),
+    });
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.text('Fill-up'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Fuel price per gal'), '5');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount purchased'), '10');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Odometer reading'), '100');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('DUPLICATE'), findsNWidgets(2));
+
+    final tile = find
+        .ancestor(
+          of: find.textContaining('\$50.00'),
+          matching: find.byType(ListTile),
+        )
+        .first;
+    await tester.tap(find.descendant(
+      of: tile,
+      matching: find.byIcon(Icons.edit_outlined),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit fill-up'), findsOneWidget);
+    await tester.enterText(find.byType(TextFormField).last, '200');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('DUPLICATE'), findsNothing);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('CSV replacement and Bluetooth merge update duplicate labels',
+      (tester) async {
+    final directory = await tester.runAsync(() async {
+      final directory = await Directory.systemTemp.createTemp('fuel_log_test_');
+      final csv = File('${directory.path}${Platform.pathSeparator}entries.csv');
+      await csv.writeAsString(
+        'Date,Odometer (mi),Price per gal,Amount (gal)\n'
+        '2026-01-01,100,2,10\n'
+        '2026-01-02,100,3,10\n',
+      );
+      return directory;
+    });
+    expect(directory, isNotNull);
+    final tempDirectory = directory!;
+    addTearDown(() => tempDirectory.delete(recursive: true));
+    final csv =
+        File('${tempDirectory.path}${Platform.pathSeparator}entries.csv');
+    const channel = MethodChannel('plugins.flutter.io/file_selector');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async => [csv.path]);
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    SharedPreferences.setMockInitialValues({});
+    late Future<int> Function(SyncSnapshot) receive;
+    await tester.runAsync(() async {
+      await tester.pumpWidget(MaterialApp(
+        home: HomePage(
+          bluetoothSharePageBuilder: (snapshot, onSnapshotReceived) {
+            receive = onSnapshotReceived;
+            return const Scaffold(body: Text('Bluetooth test'));
+          },
+        ),
+      ));
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('App menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Load CSV'));
+      await tester.pumpAndSettle();
+      for (var i = 0; i < 100 && find.text('Replace').evaluate().isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        await tester.pump();
+      }
+      expect(find.text('Replace'), findsOneWidget);
+      await tester.tap(find.text('Replace'));
+      await tester.pumpAndSettle();
+      expect(find.text('DUPLICATE'), findsNWidgets(2));
+
+      await tester.tap(find.byTooltip('App menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bluetooth Share'));
+      await tester.pumpAndSettle();
+      final now = DateTime.now();
+      await receive(SyncSnapshot(entries: [
+        _entry(id: 'synced', updatedAt: now, price: 4, odometer: 100),
+        _entry(id: 'unique', updatedAt: now, price: 5, odometer: 200),
+      ], deletions: const {}));
+      Navigator.of(tester.element(find.text('Bluetooth test'))).pop();
+      await tester.pumpAndSettle();
+      expect(find.text('DUPLICATE'), findsNWidgets(3));
+      expect(find.byKey(const ValueKey('unique')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('unique')),
+          matching: find.text('DUPLICATE'),
+        ),
+        findsNothing,
+      );
+    });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 }

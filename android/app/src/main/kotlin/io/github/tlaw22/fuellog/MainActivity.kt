@@ -29,6 +29,8 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
+    private var pendingTravelNotification: Pair<TravelNotification.Data, MethodChannel.Result>? = null
+    private val notificationPermissionRequest = 4817
     private val bluetoothExecutor = Executors.newSingleThreadExecutor()
     private val bluetoothLock = Any()
     private var bluetoothTransferGeneration = 0L
@@ -51,6 +53,30 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "androidSdkInt" -> result.success(Build.VERSION.SDK_INT)
+                "showTravelNotification" -> {
+                    val data = TravelNotification.Data.from(call)
+                    if (data == null) {
+                        result.error("invalid_arguments", "Valid travel totals are required.", null)
+                    } else if (pendingTravelNotification != null) {
+                        result.error("notification_pending", "A notification permission request is already in progress.", null)
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        try {
+                            pendingTravelNotification = data to result
+                            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationPermissionRequest)
+                        } catch (error: Exception) {
+                            pendingTravelNotification = null
+                            result.error("notification_failed", error.message ?: "Could not request notification permission.", null)
+                        }
+                    } else {
+                        postTravelNotification(data, result)
+                    }
+                }
+                "cancelTravelNotification" -> {
+                    TravelNotification.cancel(this)
+                    result.success(null)
+                }
                 "listPairedBluetoothDevices" -> listPairedBluetoothDevices(result)
                 "openBluetoothSettings" -> openBluetoothSettings(result)
                 "startBluetoothServer" -> {
@@ -229,6 +255,30 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != notificationPermissionRequest) return
+        val pending = pendingTravelNotification ?: return
+        pendingTravelNotification = null
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            postTravelNotification(pending.first, pending.second)
+        } else {
+            pending.second.success(false)
+        }
+    }
+
+    private fun postTravelNotification(data: TravelNotification.Data, result: MethodChannel.Result) {
+        try {
+            result.success(TravelNotification.show(this, data))
+        } catch (error: Exception) {
+            result.error("notification_failed", error.message ?: "Could not post the notification.", null)
         }
     }
 
@@ -484,6 +534,12 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        pendingTravelNotification?.second?.error(
+            "notification_interrupted",
+            "The notification permission request was interrupted.",
+            null,
+        )
+        pendingTravelNotification = null
         val resources = synchronized(bluetoothLock) {
             bluetoothTransferGeneration++
             val current = bluetoothServerSocket to bluetoothSocket

@@ -269,13 +269,16 @@ class _HomePageState extends State<HomePage> {
   /// Persists active entries and deleted-entry tombstones to shared preferences.
   Future<void> _save() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
+    final entriesSaved = await prefs.setString(
         _prefsKey, jsonEncode(_entries.map((e) => e.toJson()).toList()));
-    await prefs.setString(
+    final deletionsSaved = await prefs.setString(
       _deletedPrefsKey,
       jsonEncode(
           _deletions.map((id, date) => MapEntry(id, date.toIso8601String()))),
     );
+    if (!entriesSaved || !deletionsSaved) {
+      throw StateError('The fill-up data could not be saved.');
+    }
   }
 
   /// Entries oldest -> newest (by date, then odometer).
@@ -352,7 +355,66 @@ class _HomePageState extends State<HomePage> {
         _entries.add(result);
       }
     });
-    await _save();
+    try {
+      await _save();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save fill-up: $error'),
+          duration: kAppSnackBarDuration,
+        ),
+      );
+      return;
+    }
+    if (_isAndroid) await _notifyTravelComparison();
+  }
+
+  Future<void> _notifyTravelComparison() async {
+    try {
+      final now = DateTime.now();
+      final previousMonth = DateTime(now.year, now.month - 1);
+      final prefs = await SharedPreferences.getInstance();
+      double totalFor(DateTime month) {
+        final fuel = _entries
+            .where((entry) =>
+                entry.date.year == month.year &&
+                entry.date.month == month.month)
+            .fold<double>(0, (total, entry) => total + entry.total);
+        return _travelExpense(
+          fuel,
+          prefs.getDouble(_monthlyValueKey('insurance', month)) ?? 0,
+          prefs.getDouble(_monthlyValueKey('car_payment', month)) ?? 0,
+        );
+      }
+
+      final currentTotal = totalFor(now);
+      final previousTotal = totalFor(previousMonth);
+      final posted = await _androidNativeChannel.invokeMethod<bool>(
+        'showTravelNotification',
+        {
+          'currentMonth': _monthFmt.format(now),
+          'previousMonth': _monthFmt.format(previousMonth),
+          'currentAmount': _money.format(currentTotal),
+          'previousAmount': _money.format(previousTotal),
+          'currentTotal': currentTotal,
+          'previousTotal': previousTotal,
+        },
+      );
+      if (posted != true) {
+        throw StateError(
+          'Notifications are disabled. Enable them in Android settings.',
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Fill-up saved, but notification failed: $error'),
+          duration: kAppSnackBarDuration,
+        ),
+      );
+    }
   }
 
   /// Opens the About sheet with the bundled README content.
@@ -425,6 +487,9 @@ class _HomePageState extends State<HomePage> {
         if (deletedReportCount == null) {
           throw StateError('Android did not confirm report deletion.');
         }
+        await _androidNativeChannel.invokeMethod<void>(
+          'cancelTravelNotification',
+        );
       }
 
       final prefs = await SharedPreferences.getInstance();
@@ -1016,6 +1081,11 @@ class _HomePageState extends State<HomePage> {
     if (_entries.isEmpty) return const _EmptyState();
     final distances = _distances;
     final list = _chronological.reversed.toList();
+    final odometerCounts = <double, int>{};
+    for (final entry in _entries) {
+      odometerCounts.update(entry.odometer, (count) => count + 1,
+          ifAbsent: () => 1);
+    }
     return ListView.separated(
       padding: const EdgeInsets.only(bottom: 96),
       itemCount: list.length,
@@ -1055,8 +1125,34 @@ class _HomePageState extends State<HomePage> {
                 clipBehavior: Clip.antiAlias,
                 child: ListTile(
                   onTap: () => _openForm(e),
-                  title: Text(
-                    '${_dateFmt.format(e.date)}  ·  ${_money.format(e.total)}',
+                  title: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        '${_dateFmt.format(e.date)}  ·  ${_money.format(e.total)}',
+                      ),
+                      if (odometerCounts[e.odometer]! > 1)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade700,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'DUPLICATE',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   subtitle: Text(
                     '${_num1.format(e.odometer)} $kDistanceUnit odometer\n'

@@ -10,11 +10,12 @@ Demo of app available on YouTube.
 
 The home screen uses one carousel with these sections:
 
-- **Log** - Add, edit, delete, and review fill-up records.
+- **Log** - Add, edit, delete, and review fill-up records. Entries with
+  matching odometer readings are marked **DUPLICATE**.
 - **Totals** - Review all-time spending, monthly totals, weekly totals, fuel
   volume, distance, and efficiency.
-- **Graphs** - Review monthly distance and fuel-efficiency charts, and set a
-  monthly budget.
+- **Graphs** - Review spending, distance, fuel efficiency, and travel expenses,
+  and set a monthly budget.
 - **Photos** - Browse pump photos previously saved on Android.
 
 Use the carousel labels or left/right arrows to move between sections.
@@ -79,7 +80,15 @@ save-file dialog.
 The Graphs page saves monthly gross income, insurance, and car payments on this
 device. Its travel-expense comparison includes fuel purchases from the log plus
 the saved insurance and car payments, compared with the previous calendar
-month. Missing previous-month values are shown as zero.
+month. Missing previous-month values are shown as zero. Each pie shows the
+percentages of the two colored portions, in the same order as the figures to
+its left. Spending over budget fills the pie; the actual over-budget amount
+and monthly budget percentage are shown separately. When both months have no
+travel expenses, the comparison shows "No data" instead of percentages.
+On Android, saving a fill-up posts a dismissible travel-expense notification.
+Expand it to see the comparison pie and both monthly totals. Android may ask
+for notification permission; notifications can also be disabled in system
+settings. The notification is removed when app data is wiped.
 
 ## Bluetooth file sharing (Android)
 

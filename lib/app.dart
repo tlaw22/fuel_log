@@ -32,6 +32,12 @@ const MethodChannel _androidNativeChannel = fuelLogNativeChannel;
 const String _monthlyBudgetPrefsKeyPrefix = 'fuel_monthly_budget_';
 const Duration kAppSnackBarDuration = Duration(seconds: 10);
 
+String _monthlyValueKey(String name, DateTime month) =>
+    'fuel_${name}_${month.year}_${month.month}';
+
+double _travelExpense(double fuel, double insurance, double carPayment) =>
+    fuel + insurance + carPayment;
+
 typedef BluetoothSharePageBuilder = Widget Function(
   SyncSnapshot Function() snapshot,
   Future<int> Function(SyncSnapshot snapshot) onSnapshotReceived,
