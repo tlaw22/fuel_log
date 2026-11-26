@@ -19,10 +19,36 @@ The home screen uses one carousel with these sections:
 - **Charts** - Review spending, distance, fuel efficiency, and travel expenses,
   and set a monthly budget.
 - **Photos** - Browse pump photos previously saved on Android.
+- **Lunch** - Record restaurant purchases, set a recurring daily lunch budget,
+  and review daily, Monday-to-Sunday weekly, and monthly spending. Use the
+  **Add lunch** floating button to enter a purchase. The daily pie shows
+  spending against the budget; the custom chart compares food spending by
+  period or restaurant, or the daily budget and remaining amount. Chart
+  selections are remembered locally. Weekly
+  totals include the whole week even when it crosses a month boundary; each
+  monthly card shows only the days in that month.
 
 The About and Photos pages link to downloads for other platforms.
 
 Use the carousel labels or left/right arrows to move between sections.
+At startup, a spinner appears on a white background while local data loads.
+On the Web, it appears before Flutter finishes initializing.
+On Log, Totals, Charts, and Photos, sections reveal from top to bottom at
+half-second intervals each time the page is opened. Reduced-motion settings
+show the content immediately.
+
+The **Include lunch** selector at the bottom of Totals and Charts is shared
+between both pages, remembered locally, and initially off. When enabled,
+Totals separates fuel, lunch, and combined spending for each month and week,
+including periods with lunch but no fill-ups; weeks are split at month
+boundaries within the monthly cards. On Charts, the monthly budget
+pie separates fuel, remaining budget, and lunch; if spending exceeds the
+budget, the pie shows each purchase category's share of actual spending.
+The month comparison includes each month's lunch in that month's total. The
+custom chart adds this month's lunch as a third slice; selected amounts may
+overlap. Its remaining-budget value also accounts for lunch. Fuel volume,
+distance, and efficiency remain fuel-only. Fuel CSV
+exports, reports, and fill-up notifications are unchanged.
 
 ## Theme
 
@@ -59,18 +85,22 @@ The menu in the left side of the AppBar provides:
   with the Windows save dialog or Web browser download.
 - **About** - Read this README from the app.
 - **Reports** - Generate a plain-text snapshot of the fuel log. Reports appear
-  in a list and open in a readable bottom sheet with download and share
+  in a list and open in a readable bottom sheet with download, share, and copy
   actions; Web reports stay in browser storage and can be downloaded or opened
   in the default mail app, while Android reports are saved in Documents and
   shared with the system share sheet. Reports include monthly summaries for up
   to the two most recent months, plus full fill-up details.
+  Browser clipboard access may require HTTPS or localhost and permission.
 - **Wipe Data** - After confirmation, permanently remove saved fill-ups,
-  monthly budget data, generated reports, and pump photos. CSV backups can
-  restore fill-ups only; monthly values, reports, and photos are not included
-  in CSV backups.
+  monthly budget data, lunch entries, budget and chart selections, generated
+  reports, and pump photos. CSV backups can restore fill-ups only; monthly
+  values, lunch data, reports, and photos are not included in CSV backups.
 
 CSV files include fill-up date, odometer, price, amount, total cost, distance
 since the previous fill-up, and efficiency when available.
+
+Lunch records and the lunch budget are stored locally on this device. They
+are separate from fuel reports, CSV import/export, and Bluetooth sync.
 
 On Android, saved CSV files are placed in the device's Documents folder.
 Windows uses the system save and file-picker dialogs. Web downloads exported
@@ -94,15 +124,20 @@ and monthly budget percentage are shown separately. The bottom **Custom Chart**
 compares any two financial amounts chosen from its dropdowns, and remembers
 those selections. A missing budget or two zero amounts show "No data";
 negative amounts show "Negative amount" instead of a percentage.
+
+Saving lunch from the Lunch button posts a separate notification with the
+purchase price and the selected day's lunch spending versus the remaining daily
+budget. The pie fills when over budget; without a budget, it shows "No data".
+The lunch notification does not replace the fill-up notification.
 Saving a fill-up posts a custom-chart notification on Android, Windows, and
 supported browsers, with the amount purchased and total cost in the notification
 title.
-Android displays the comparison pie; browser notifications
-include it when supported, while Windows displays a text summary. Browsers ask
+Android displays the comparison pie; browser notifications include it when
+supported. Windows shows a pie for lunch and a text summary for fill-ups. Browsers ask
 for permission on Save and require HTTPS or localhost. Windows uses system
 notification settings rather than an app permission prompt. Android may also
 request notification permission. Notifications can be disabled in system or
-browser settings. The app attempts to remove its notification when data is
+browser settings. The app attempts to remove its notifications when data is
 wiped; Windows may restrict notification removal for unpackaged apps.
 
 ## Bluetooth file sharing (Android)

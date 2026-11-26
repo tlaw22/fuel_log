@@ -6,3 +6,6 @@ Future<void> show(Map<String, Object?> data) =>
 
 Future<void> cancel() =>
     Future.error(UnsupportedError('Browser notifications are unavailable.'));
+
+Future<void> cancelLunch() =>
+    Future.error(UnsupportedError('Browser notifications are unavailable.'));

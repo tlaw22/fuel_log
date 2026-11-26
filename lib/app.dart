@@ -21,12 +21,16 @@ import 'widgets/notify_web_stub.dart'
     if (dart.library.js_interop) 'widgets/notify_web.dart' as browser_notifications;
 
 part 'pages/home_page.dart';
+part 'pages/lunch_page.dart';
 part 'pages/charts_page.dart';
 part 'custom_chart.dart';
 part 'widgets/shared_widgets.dart';
+part 'widgets/page_shimmer.dart';
 part 'widgets/entry_form.dart';
+part 'widgets/lunch_entry_form.dart';
 part 'widgets/mute_sound_control.dart';
 part 'widgets/notify.dart';
+part 'widgets/lunch_notification.dart';
 part 'pages/pump_photos.dart';
 part 'widgets/about.dart';
 part 'widgets/download_platforms.dart';

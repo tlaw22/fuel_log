@@ -1,120 +1,76 @@
-<!DOCTYPE html><html><head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
+<!DOCTYPE html>
+<html>
+<head>
+  <!-- Flutter replaces this value when building with --base-href. -->
   <base href="$FLUTTER_BASE_HREF">
-
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
-
-  <!-- iOS meta tags & icons -->
+  <meta name="description" content="A simple fuel log with weekly and monthly totals.">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="FuelLog">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png">
-
   <title>FuelLog</title>
   <link rel="manifest" href="manifest.json">
-  <script src="fuel_notifications.js"></script>
-  
-  
-  <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
-  <style id="splash-screen-style">
-    html {
-      height: 100%
-    }
-
-    body {
+  <style>
+    html, body {
       margin: 0;
       min-height: 100%;
-      background-color: #FFFFFF;
-          background-size: 100% 100%;
+      background: #fff;
     }
-
-    .center {
-      margin: 0;
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      -ms-transform: translate(-50%, -50%);
-      transform: translate(-50%, -50%);
+    #startup-loading {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: #fff;
+      z-index: 2147483647;
     }
-
-    .contain {
-      display:block;
-      width:100%; height:100%;
-      object-fit: contain;
+    #startup-spinner {
+      width: 36px;
+      height: 36px;
+      box-sizing: border-box;
+      border: 4px solid rgba(0, 53, 102, 0.2);
+      border-top-color: #003566;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
     }
-
-    .stretch {
-      display:block;
-      width:100%; height:100%;
+    #startup-error {
+      color: #222;
+      font: 16px sans-serif;
+      text-align: center;
+      padding: 24px;
     }
-
-    .cover {
-      display:block;
-      width:100%; height:100%;
-      object-fit: cover;
-    }
-
-    .bottom {
-      position: absolute;
-      bottom: 0;
-      left: 50%;
-      -ms-transform: translate(-50%, 0);
-      transform: translate(-50%, 0);
-    }
-
-    .bottomLeft {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-    }
-
-    .bottomRight {
-      position: absolute;
-      bottom: 0;
-      right: 0;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      body {
-        background-color: #FFFFFF;
-          }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      #startup-spinner { animation: none; }
     }
   </style>
-  <script id="splash-screen-script">
-    function removeSplashFromWeb() {
-      document.getElementById("splash")?.remove();
-      document.getElementById("splash-branding")?.remove();
-      document.body.style.background = "transparent";
+  <script>
+    function showStartupError() {
+      const loading = document.getElementById('startup-loading');
+      if (!loading) return;
+      document.getElementById('startup-spinner').hidden = true;
+      document.getElementById('startup-error').hidden = false;
+      loading.removeAttribute('aria-busy');
     }
+    window.addEventListener('flutter-first-frame', () => {
+      document.getElementById('startup-loading')?.remove();
+    }, { once: true });
+    window.addEventListener('unhandledrejection', showStartupError);
   </script>
+  <script src="fuel_notifications.js" defer></script>
+  <script src="flutter_bootstrap.js" defer onerror="showStartupError()"></script>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
-
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
-  <script src="flutter_bootstrap.js" async=""></script>
-
-
-</body></html>
+  <div id="startup-loading" role="status" aria-label="Loading FuelLog" aria-busy="true">
+    <div id="startup-spinner"></div>
+    <div id="startup-error" role="alert" hidden>
+      <p>Could not start FuelLog.</p>
+      <button onclick="window.location.reload()">Retry</button>
+    </div>
+  </div>
+</body>
+</html>

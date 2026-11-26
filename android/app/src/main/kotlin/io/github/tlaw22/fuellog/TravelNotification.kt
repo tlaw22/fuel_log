@@ -18,6 +18,8 @@ import kotlin.math.roundToInt
 object TravelNotification {
     private const val channelId = "travel_expenses"
     private const val notificationId = 4817
+    private const val lunchChannelId = "lunch_expenses"
+    private const val lunchNotificationId = 4818
     private const val currentColor = 0xFFFFC300.toInt()
     private const val previousColor = 0xFF003566.toInt()
 
@@ -29,6 +31,7 @@ object TravelNotification {
         val secondAmount: String,
         val firstTotal: Double?,
         val secondTotal: Double?,
+        val details: String,
     ) {
         companion object {
             fun from(call: MethodCall): Data? {
@@ -37,33 +40,40 @@ object TravelNotification {
                 val secondLabel = call.argument<String>("secondLabel") ?: return null
                 val firstAmount = call.argument<String>("firstAmount") ?: return null
                 val secondAmount = call.argument<String>("secondAmount") ?: return null
+                val details = call.argument<String>("fillUp") ?: return null
                 val firstTotal = call.argument<Double>("firstTotal")
                 val secondTotal = call.argument<Double>("secondTotal")
                 if ((firstTotal != null && !firstTotal.isFinite()) ||
                     (secondTotal != null && !secondTotal.isFinite())
                 ) return null
-                return Data(title, firstLabel, secondLabel, firstAmount, secondAmount, firstTotal, secondTotal)
+                return Data(title, firstLabel, secondLabel, firstAmount, secondAmount, firstTotal, secondTotal, details)
             }
         }
     }
 
-    fun cancel(context: Context) {
+    fun cancel(context: Context, lunch: Boolean = false) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.cancel(notificationId)
+        manager.cancel(if (lunch) lunchNotificationId else notificationId)
     }
 
-    fun show(context: Context, data: Data): Boolean {
+    fun show(context: Context, data: Data, lunch: Boolean = false): Boolean {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val selectedChannel = if (lunch) lunchChannelId else channelId
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
-                NotificationChannel(channelId, "Travel expenses", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "Custom chart comparison after saving a fill-up"
+                NotificationChannel(
+                    selectedChannel,
+                    if (lunch) "Lunch expenses" else "Travel expenses",
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = if (lunch) "Daily lunch budget after saving lunch"
+                        else "Custom chart comparison after saving a fill-up"
                 },
             )
         }
         if (!manager.areNotificationsEnabled() ||
             (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-                manager.getNotificationChannel(channelId).importance == NotificationManager.IMPORTANCE_NONE)
+                manager.getNotificationChannel(selectedChannel).importance == NotificationManager.IMPORTANCE_NONE)
         ) return false
 
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -73,31 +83,32 @@ object TravelNotification {
             context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(context, channelId)
+            Notification.Builder(context, selectedChannel)
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(context)
         }
         val summary = "${data.firstLabel}: ${data.firstAmount}  |  ${data.secondLabel}: ${data.secondAmount}"
+        val content = if (lunch) "${data.details}  |  $summary" else summary
         val notification = builder
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(data.title)
-            .setContentText(summary)
+            .setContentText(content)
             .setStyle(
                 Notification.BigPictureStyle()
                     .setBigContentTitle(data.title)
-                    .bigPicture(picture(data))
-                    .setSummaryText(summary),
+                    .bigPicture(picture(data, lunch))
+                    .setSummaryText(content),
             )
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .build()
-        manager.notify(notificationId, notification)
+        manager.notify(if (lunch) lunchNotificationId else notificationId, notification)
         return true
     }
 
-    private fun picture(data: Data): Bitmap {
+    private fun picture(data: Data, lunch: Boolean): Bitmap {
         val bitmap = Bitmap.createBitmap(600, 240, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
@@ -125,7 +136,8 @@ object TravelNotification {
         val sum = if (first == null || second == null) 0.0 else first + second
         val share = if (negative || first == null || second == null || sum == 0.0) 0.0 else first / sum
         val bounds = RectF(372f, 28f, 556f, 212f)
-        paint.color = previousColor
+        paint.color = if (lunch && (first == null || second == null || sum == 0.0))
+            Color.LTGRAY else previousColor
         canvas.drawCircle(bounds.centerX(), bounds.centerY(), 92f, paint)
         paint.color = currentColor
         canvas.drawArc(bounds, -90f, (share * 360).toFloat(), true, paint)

@@ -2,26 +2,29 @@ part of '../app.dart';
 
 // ======================= Widgets =======================
 
-/// Shows startup status while the app loads its saved local data.
+/// Shows a spinner or a recoverable local-data loading error.
 class _StartupLoadingScreen extends StatelessWidget {
-  final double progress;
   final String? error;
   final VoidCallback onRetry;
 
   const _StartupLoadingScreen({
-    required this.progress,
     required this.error,
     required this.onRetry,
   });
 
   @override
   Widget build(BuildContext context) {
-    final percent = (progress.clamp(0, 1) * 100).round();
     return ColoredBox(
       color: Colors.white,
       child: SafeArea(
         child: Center(
-          child: ConstrainedBox(
+          child: error == null
+              ? const CircularProgressIndicator(
+                  key: ValueKey('startup-spinner'),
+                  color: kBlue,
+                  semanticsLabel: 'Loading local data',
+                )
+              : ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 480),
             child: Padding(
               padding: const EdgeInsets.all(24),
@@ -29,47 +32,16 @@ class _StartupLoadingScreen extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text(
-                    'Loading Local Data',
+                  Text(
+                    'Could not load local data: $error',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: const TextStyle(color: Colors.black87),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'This app does not sell/share/collect any data.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.black87),
+                  FilledButton(
+                    onPressed: onRetry,
+                    child: const Text('Retry'),
                   ),
-                  const SizedBox(height: 32),
-                  if (error == null) ...[
-                    LinearProgressIndicator(
-                      value: progress,
-                      minHeight: 8,
-                      backgroundColor: const Color(0xFFE0E0E0),
-                      color: const Color(0xFF003566),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      '$percent% loaded',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.black87),
-                    ),
-                  ] else ...[
-                    Text(
-                      'Could not load local data: $error',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.black87),
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: onRetry,
-                      child: const Text('Retry'),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -111,15 +83,22 @@ class _EmptyState extends StatelessWidget {
 /// Displays aggregate statistics in a responsive wrapping layout.
 class _StatsWrap extends StatelessWidget {
   final Stats stats;
+  final double? lunchSpent;
 
   /// Creates a statistics wrap from the supplied aggregate values.
-  const _StatsWrap({required this.stats});
+  const _StatsWrap({required this.stats, this.lunchSpent});
 
   /// Builds the labels and values for the supplied aggregate statistics.
   @override
   Widget build(BuildContext context) {
     final items = <(String, String)>[
-      ('Spent', _money.format(stats.spent)),
+      if (lunchSpent == null)
+        ('Spent', _money.format(stats.spent))
+      else ...[
+        ('Fuel spent', _money.format(stats.spent)),
+        ('Lunch spent', _money.format(lunchSpent)),
+        ('Combined spent', _money.format(stats.spent + lunchSpent!)),
+      ],
       ('Fuel', '${_num1.format(stats.volume)} $kVolumeUnit'),
       ('Distance', '${_num1.format(stats.distance)} $kDistanceUnit'),
       ('Efficiency', fmtEfficiency(stats.efficiency)),
@@ -150,9 +129,10 @@ class _StatsWrap extends StatelessWidget {
 class _WeekRow extends StatelessWidget {
   final WeekGroup week;
   final Stats stats;
+  final double? lunchSpent;
 
   /// Creates a row for the supplied week and statistics.
-  const _WeekRow({required this.week, required this.stats});
+  const _WeekRow({required this.week, required this.stats, this.lunchSpent});
 
   /// Builds the weekly summary row.
   @override
@@ -171,7 +151,8 @@ class _WeekRow extends StatelessWidget {
           ),
           Expanded(
             child: Text(
-              '${_money.format(stats.spent)}  ·  ${_num1.format(stats.volume)} $kVolumeUnit\n'
+              '${lunchSpent == null ? _money.format(stats.spent) : 'Fuel ${_money.format(stats.spent)} · Lunch ${_money.format(lunchSpent)} · Combined ${_money.format(stats.spent + lunchSpent!)}'}'
+              '  ·  ${_num1.format(stats.volume)} $kVolumeUnit\n'
               '${_num1.format(stats.distance)} $kDistanceUnit  ·  ${fmtEfficiency(stats.efficiency)}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
@@ -180,4 +161,56 @@ class _WeekRow extends StatelessWidget {
       ),
     );
   }
+
 }
+
+class _LunchInclusionControl extends StatelessWidget {
+    const _LunchInclusionControl({
+      super.key,
+      required this.included,
+      required this.onChanged,
+    });
+
+    final bool included;
+    final ValueChanged<bool>? onChanged;
+
+    @override
+    Widget build(BuildContext context) => Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text('Include lunch', style: Theme.of(context).textTheme.labelLarge),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, label: Text('Off')),
+                ButtonSegment(value: true, label: Text('On')),
+              ],
+              selected: {included},
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              onSelectionChanged:
+                  onChanged == null ? null : (values) => onChanged!(values.single),
+            ),
+          ],
+        );
+  }
+
+  class _LunchDataError extends StatelessWidget {
+    const _LunchDataError({required this.error, required this.onRetry});
+
+    final String error;
+    final VoidCallback? onRetry;
+
+    @override
+    Widget build(BuildContext context) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Could not load lunch data: $error'),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        );
+  }

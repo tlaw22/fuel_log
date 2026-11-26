@@ -72,13 +72,15 @@ class _CustomChartValues {
   final Map<_CustomChartMetric, double?> amounts;
 
   _CustomChartValues(
-      List<FuelEntry> entries, SharedPreferences prefs, DateTime now)
-      : amounts = _calculate(entries, prefs, now);
+      List<FuelEntry> entries, SharedPreferences prefs, DateTime now,
+      {double lunchSpent = 0})
+      : amounts = _calculate(entries, prefs, now, lunchSpent);
 
   static Map<_CustomChartMetric, double?> _calculate(
     List<FuelEntry> entries,
     SharedPreferences prefs,
     DateTime now,
+    double lunchSpent,
   ) {
     final previous = DateTime(now.year, now.month - 1);
     double fuelFor(DateTime month) => entries
@@ -113,7 +115,7 @@ class _CustomChartValues {
       _CustomChartMetric.incomeAfterTravel: income - currentTravel,
       _CustomChartMetric.budget: budget,
       _CustomChartMetric.budgetRemaining:
-          budget == null ? null : math.max(0, budget - fuel).toDouble(),
+          budget == null ? null : math.max(0, budget - fuel - lunchSpent).toDouble(),
     };
   }
 }

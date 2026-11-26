@@ -379,7 +379,7 @@ class _ReportsPageState extends State<ReportsPage> {
   }
 }
 
-class _ReportPreviewSheet extends StatelessWidget {
+class _ReportPreviewSheet extends StatefulWidget {
   final _SavedFuelReport report;
   final VoidCallback onDownload;
   final VoidCallback onShare;
@@ -389,6 +389,37 @@ class _ReportPreviewSheet extends StatelessWidget {
     required this.onDownload,
     required this.onShare,
   });
+
+  @override
+  State<_ReportPreviewSheet> createState() => _ReportPreviewSheetState();
+}
+
+class _ReportPreviewSheetState extends State<_ReportPreviewSheet> {
+  bool _copying = false;
+  String? _copyMessage;
+  bool _copyFailed = false;
+
+  Future<void> _copyReport() async {
+    setState(() {
+      _copying = true;
+      _copyMessage = null;
+    });
+    String message;
+    var failed = false;
+    try {
+      await Clipboard.setData(ClipboardData(text: widget.report.contents));
+      message = 'Report copied to clipboard.';
+    } catch (error) {
+      message = 'Could not copy report: $error';
+      failed = true;
+    }
+    if (!mounted) return;
+    setState(() {
+      _copying = false;
+      _copyMessage = message;
+      _copyFailed = failed;
+    });
+  }
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -401,7 +432,7 @@ class _ReportPreviewSheet extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      report.fileName,
+                      widget.report.fileName,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
@@ -417,16 +448,36 @@ class _ReportPreviewSheet extends StatelessWidget {
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
-                child: SelectableText(report.contents),
+                child: SelectableText(
+                  widget.report.contents,
+                  style: const TextStyle(fontFamily: 'Oswald', fontSize: 10),
+                ),
               ),
             ),
+            if (_copyMessage != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    _copyMessage!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _copyFailed
+                          ? Theme.of(context).colorScheme.error
+                          : null,
+                    ),
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: onDownload,
+                      onPressed: widget.onDownload,
                       icon: const Icon(Icons.file_download_outlined),
                       label: const Text('Download Report'),
                     ),
@@ -434,10 +485,16 @@ class _ReportPreviewSheet extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: onShare,
+                      onPressed: widget.onShare,
                       icon: const Icon(Icons.share_outlined),
                       label: const Text('Share Report'),
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Copy report',
+                    onPressed: _copying ? null : () => unawaited(_copyReport()),
+                    icon: const Icon(Icons.copy_outlined),
                   ),
                 ],
               ),

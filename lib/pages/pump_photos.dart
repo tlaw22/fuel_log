@@ -417,9 +417,13 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
     return Column(
       children: [
         Expanded(child: _buildGallery()),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: _DownloadPlatforms(),
+        const _PageReveal(
+          key: ValueKey('reveal-photos-download'),
+          index: 2,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: _DownloadPlatforms(),
+          ),
         ),
       ],
     );
@@ -430,7 +434,10 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
     if (!_isAndroid) return _buildExternalGallery();
     return Column(
       children: [
-        Padding(
+        _PageReveal(
+          key: const ValueKey('reveal-photos-header'),
+          index: 0,
+          child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
           child: Row(
             children: [
@@ -447,9 +454,13 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
               ),
             ],
           ),
+          ),
         ),
         Expanded(
-          child: _isLoading
+          child: _PageReveal(
+            key: const ValueKey('reveal-photos-gallery'),
+            index: 1,
+            child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
                   ? Center(
@@ -497,6 +508,7 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
                             );
                           },
                         ),
+          ),
         ),
       ],
     );
@@ -504,7 +516,10 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
 
   Widget _buildAndroidOnlyFeature() => Column(
         children: [
-          Padding(
+          _PageReveal(
+            key: const ValueKey('reveal-photos-header'),
+            index: 0,
+            child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
             child: Align(
               alignment: Alignment.centerLeft,
@@ -513,12 +528,17 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
+            ),
           ),
           const Expanded(
-            child: Center(
-              child: FilledButton.tonal(
-                onPressed: null,
-                child: Text('Android Only Feature'),
+            child: _PageReveal(
+              key: ValueKey('reveal-photos-gallery'),
+              index: 1,
+              child: Center(
+                child: FilledButton.tonal(
+                  onPressed: null,
+                  child: Text('Android Only Feature'),
+                ),
               ),
             ),
           ),
@@ -538,7 +558,10 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
             : 'Choose the Pictures folder to browse its images.';
     return Column(
       children: [
-        Padding(
+        _PageReveal(
+          key: const ValueKey('reveal-photos-header'),
+          index: 0,
+          child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
           child: Row(
             children: [
@@ -556,9 +579,13 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
               ),
             ],
           ),
+          ),
         ),
         Expanded(
-          child: _isLoading
+          child: _PageReveal(
+            key: const ValueKey('reveal-photos-gallery'),
+            index: 1,
+            child: _isLoading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
                   ? Center(
@@ -600,6 +627,7 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
                             );
                           },
                         ),
+          ),
         ),
       ],
     );

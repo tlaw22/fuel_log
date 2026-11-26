@@ -281,25 +281,38 @@ void main() {
         buildTheme(palette: ThemePalette.forest).scaffoldBackgroundColor);
   });
 
-  testWidgets('startup shows local-data progress and privacy notice',
+  testWidgets('startup shows a spinner on white without an artificial delay',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
 
-    expect(find.text('Loading Local Data'), findsOneWidget);
-    expect(
-      find.text(
-        'This app does not sell/share/collect any data.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.byType(LinearProgressIndicator), findsOneWidget);
-    expect(find.textContaining('% loaded'), findsOneWidget);
+    final spinner = find.byKey(const ValueKey('startup-spinner'));
+    expect(spinner, findsOneWidget);
+    final background = find.ancestor(of: spinner, matching: find.byType(ColoredBox));
+    expect(tester.widget<ColoredBox>(background.first).color, Colors.white);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    await tester.pump();
+    expect(spinner, findsNothing);
+    expect(find.text('Fill-up'), findsOneWidget);
+  });
 
-    await tester.pump(const Duration(milliseconds: 250));
-    expect(find.text('Loading Local Data'), findsOneWidget);
-    await _pumpStartupToCompletion(tester);
-    expect(find.text('Loading Local Data'), findsNothing);
+  testWidgets('startup loading errors remain visible and retryable',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'fuel_entries_v1': 'invalid json'});
+    final errors = <FlutterErrorDetails>[];
+    final oldHandler = FlutterError.onError;
+    FlutterError.onError = errors.add;
+    addTearDown(() => FlutterError.onError = oldHandler);
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pump();
+    expect(find.textContaining('Could not load local data:'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(errors, hasLength(1));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('fuel_entries_v1', '[]');
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    expect(find.text('Fill-up'), findsOneWidget);
   });
 
   testWidgets('new fill-up form shows a pump camera action', (tester) async {
@@ -877,6 +890,9 @@ void main() {
       'fuel_reports_v1': jsonEncode([
         {'fileName': 'fuel_log_report_old.txt', 'contents': 'Old report'},
       ]),
+      'lunch_entries_v1': '[]',
+      'lunch_daily_budget_v1': 12.0,
+      'lunch_chart_selection_v1': ['restaurant:sample', 'today'],
       'fuel_theme_is_dark_v1': false,
       'fuel_dark_palette_v1': 'forest',
       'fuel_light_palette_v1': 'rose',
@@ -927,6 +943,9 @@ void main() {
     expect(
         prefs.getDouble('fuel_car_payment_${now.year}_${now.month}'), isNull);
     expect(prefs.getString('fuel_reports_v1'), isNull);
+    expect(prefs.getString('lunch_entries_v1'), isNull);
+    expect(prefs.getDouble('lunch_daily_budget_v1'), isNull);
+    expect(prefs.getStringList('lunch_chart_selection_v1'), isNull);
     expect(prefs.getBool('fuel_theme_is_dark_v1'), isFalse);
     expect(prefs.getString('fuel_dark_palette_v1'), 'forest');
     expect(prefs.getString('fuel_light_palette_v1'), 'rose');
@@ -1846,6 +1865,8 @@ void main() {
     await tester.tap(find.textContaining('fuel_log_report_'));
     await tester.pumpAndSettle();
     final report = tester.widget<SelectableText>(find.byType(SelectableText));
+    expect(report.style?.fontFamily, 'Oswald');
+    expect(report.style?.fontSize, 10);
     expect(report.data, contains('Fill-ups: 1'));
     expect(report.data, contains('Odometer: 120.0 mi'));
     expect(report.data, contains('January 2026 | Fill-ups: 1'));
@@ -1853,6 +1874,58 @@ void main() {
     expect(find.text('Download Report'), findsOneWidget);
     expect(find.text('Share Report'), findsOneWidget);
   });
+
+  testWidgets('report copy button copies exact text and reports errors',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(320, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const contents = 'Fuel Log Report\nFuel: 10.0 gal\nEfficiency: —';
+    SharedPreferences.setMockInitialValues({
+      'fuel_reports_v1': jsonEncode([
+        {'fileName': 'report.txt', 'contents': contents},
+      ]),
+    });
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    String? copied;
+    var fail = false;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        if (fail) throw PlatformException(code: 'clipboard_error');
+        copied = (call.arguments as Map<dynamic, dynamic>)['text'] as String;
+      }
+      return null;
+    });
+    addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await tester.pumpWidget(
+      const MaterialApp(home: ReportsPage(entries: [], distances: {})),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('report.txt'));
+    await tester.pumpAndSettle();
+
+    final copy = find.byTooltip('Copy report');
+    expect(copy, findsOneWidget);
+    expect(tester.getTopLeft(copy).dx,
+        greaterThan(tester.getTopLeft(find.text('Share Report')).dx));
+    await tester.tap(copy);
+    await tester.pump();
+    expect(copied, contents);
+    expect(find.text('Report copied to clipboard.'), findsOneWidget);
+    expect(find.text('Download Report'), findsOneWidget);
+    expect(find.text('Share Report'), findsOneWidget);
+
+    fail = true;
+    await tester.tap(copy);
+    await tester.pump();
+    expect(find.textContaining('Could not copy report:'), findsOneWidget);
+    expect(find.text('Report copied to clipboard.'), findsNothing);
+    expect(tester.takeException(), isNull);
+  }, variant: const TargetPlatformVariant({
+    TargetPlatform.android,
+    TargetPlatform.windows,
+  }));
 
   testWidgets(
       'reports include monthly summaries for only the latest two months',
@@ -2198,11 +2271,15 @@ void main() {
     late Future<int> Function(SyncSnapshot) receive;
     await tester.runAsync(() async {
       await tester.pumpWidget(MaterialApp(
-        home: HomePage(
-          bluetoothSharePageBuilder: (snapshot, onSnapshotReceived) {
-            receive = onSnapshotReceived;
-            return const Scaffold(body: Text('Bluetooth test'));
-          },
+        home: MediaQuery(
+          data: MediaQueryData.fromView(tester.view)
+              .copyWith(disableAnimations: true),
+          child: HomePage(
+            bluetoothSharePageBuilder: (snapshot, onSnapshotReceived) {
+              receive = onSnapshotReceived;
+              return const Scaffold(body: Text('Bluetooth test'));
+            },
+          ),
         ),
       ));
       await Future<void>.delayed(const Duration(milliseconds: 600));

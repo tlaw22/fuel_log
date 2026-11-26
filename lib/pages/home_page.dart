@@ -180,30 +180,34 @@ class _HomePageState extends State<HomePage> {
   static const _prefsKey = 'fuel_entries_v1';
   static const _deletedPrefsKey = 'fuel_entries_deleted_v1';
   static const _soundMutedPrefsKey = 'fuel_save_sound_muted_v1';
-  static const _minimumStartupScreenDuration = Duration(milliseconds: 500);
+  static const _includeLunchPrefsKey = 'fuel_include_lunch_v1';
+  static Future<void>? _pendingIncludeLunchSave;
   static const _monthlyDataPrefixes = [
     _monthlyBudgetPrefsKeyPrefix,
     'fuel_income_',
     'fuel_insurance_',
     'fuel_car_payment_',
   ];
-  static const _pageNames = ['Log', 'Totals', 'Charts', 'Photos'];
+  static const _pageNames = ['Log', 'Totals', 'Charts', 'Photos', 'Lunch'];
   static const _pageIcons = [
     Icons.list_alt,
     Icons.bar_chart,
     Icons.pie_chart_outline,
     Icons.photo_library_outlined,
+    Icons.lunch_dining,
   ];
   final CarouselSliderController _carouselController =
       CarouselSliderController();
   List<FuelEntry> _entries = [];
+  List<_LunchEntry> _lunchEntries = [];
+  String? _lunchLoadError;
+  bool _includeLunch = false;
   Map<String, DateTime> _deletions = {};
   bool _loaded = false;
-  double _loadingProgress = 0;
   String? _loadError;
   int _currentPage = 0;
   int _dataGeneration = 0;
-  late final Future<void> _startupVisibilityDelay;
+  GlobalKey<_LunchPageState> _lunchKey = GlobalKey<_LunchPageState>();
   AudioPlayer? _saveSoundPlayer;
   bool _soundMuted = false;
   Future<void> _soundMuteSaveQueue = Future<void>.value();
@@ -218,8 +222,6 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _startupVisibilityDelay =
-        Future<void>.delayed(_minimumStartupScreenDuration);
     _load();
   }
 
@@ -288,11 +290,19 @@ class _HomePageState extends State<HomePage> {
   /// Loads active entries and deleted-entry tombstones from shared preferences.
   Future<void> _load() async {
     try {
+      await _pendingIncludeLunchSave;
       final prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
       _soundMuted = prefs.getBool(_soundMutedPrefsKey) ?? false;
-      setState(() => _loadingProgress = 0.25);
-
+      _includeLunch = prefs.getBool(_includeLunchPrefsKey) ?? false;
+      await _pendingLunchEntriesSave;
+      if (!mounted) return;
+      try {
+        _lunchEntries = _readLunchEntries(prefs);
+        _lunchLoadError = null;
+      } catch (error) {
+        _lunchLoadError = error.toString();
+      }
       final raw = prefs.getString(_prefsKey);
       if (raw != null) {
         final list = (jsonDecode(raw) as List)
@@ -301,17 +311,12 @@ class _HomePageState extends State<HomePage> {
         _entries = list;
       }
       if (!mounted) return;
-      setState(() => _loadingProgress = 0.7);
-
       final rawDeletions = prefs.getString(_deletedPrefsKey);
       if (rawDeletions != null) {
         _deletions = (jsonDecode(rawDeletions) as Map<String, dynamic>).map(
           (id, value) => MapEntry(id, DateTime.parse(value as String)),
         );
       }
-      if (!mounted) return;
-      setState(() => _loadingProgress = 1);
-      await _startupVisibilityDelay;
       if (!mounted) return;
       setState(() => _loaded = true);
     } catch (error, stackTrace) {
@@ -330,9 +335,59 @@ class _HomePageState extends State<HomePage> {
   void _retryLoad() {
     setState(() {
       _loadError = null;
-      _loadingProgress = 0;
     });
     unawaited(_load());
+  }
+
+  Future<void> _retryLunchLoad() async {
+    final generation = _dataGeneration;
+    try {
+      await _pendingLunchEntriesSave;
+      final prefs = await SharedPreferences.getInstance();
+      final entries = _readLunchEntries(prefs);
+      if (!mounted || generation != _dataGeneration) return;
+      setState(() {
+        _lunchEntries = entries;
+        _lunchLoadError = null;
+      });
+    } catch (error) {
+      if (mounted && generation == _dataGeneration) {
+        setState(() => _lunchLoadError = error.toString());
+      }
+    }
+  }
+
+  void _setIncludeLunch(bool value) {
+    setState(() => _includeLunch = value);
+    final previous = _pendingIncludeLunchSave;
+    final save = () async {
+      if (previous != null) await previous;
+      final prefs = await SharedPreferences.getInstance();
+      if (!await prefs.setBool(_includeLunchPrefsKey, value)) {
+        throw StateError('Storage did not confirm the save');
+      }
+    }();
+    final pending =
+        save.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    _pendingIncludeLunchSave = pending;
+    unawaited(pending.whenComplete(() {
+      if (identical(_pendingIncludeLunchSave, pending)) {
+        _pendingIncludeLunchSave = null;
+      }
+    }));
+    unawaited(save.catchError((Object error, StackTrace stackTrace) {
+      FlutterError.reportError(FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'FuelLog lunch inclusion',
+      ));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not save lunch inclusion setting: $error'),
+          duration: kAppSnackBarDuration,
+        ));
+      }
+    }));
   }
 
   /// Persists active entries and deleted-entry tombstones to shared preferences.
@@ -486,7 +541,8 @@ class _HomePageState extends State<HomePage> {
           'generated reports, and saved pump photos. Fill-ups can only be '
           'restored from a backup CSV. Monthly budget data, generated reports, '
           'and pump photos are not included in CSV backups and cannot be '
-          'restored.',
+          'restored. Lunch entries, budget, and chart selections are also '
+          'deleted and cannot be restored from CSV backups.',
         ),
         actions: [
           TextButton(
@@ -536,6 +592,7 @@ class _HomePageState extends State<HomePage> {
           throw StateError('Android did not confirm report deletion.');
         }
         await FuelLogNotifications.cancel();
+        await _LunchNotification.cancel();
       }
 
       Object? notificationError;
@@ -545,12 +602,22 @@ class _HomePageState extends State<HomePage> {
         } catch (error) {
           notificationError = error;
         }
+        try {
+          await _LunchNotification.cancel();
+        } catch (error) {
+          notificationError ??= error;
+        }
       }
+      await _pendingLunchChartSave;
+      await _pendingLunchEntriesSave;
       final prefs = await SharedPreferences.getInstance();
       final keysToRemove = prefs.getKeys().where((key) {
         return key == _prefsKey ||
             key == _deletedPrefsKey ||
             key == _savedReportsPreferencesKey ||
+            key == _lunchEntriesKey ||
+            key == _lunchBudgetKey ||
+            key == _lunchChartSelectionKey ||
             _monthlyDataPrefixes.any(key.startsWith);
       }).toList();
       for (final key in keysToRemove) {
@@ -561,8 +628,11 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() {
         _entries = [];
+        _lunchEntries = [];
+        _lunchLoadError = null;
         _deletions = {};
         _dataGeneration++;
+        _lunchKey = GlobalKey<_LunchPageState>();
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -612,7 +682,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Builds the swipeable Log, Totals, Charts, and Photos carousel.
+  /// Builds the swipeable app sections.
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -737,14 +807,25 @@ class _HomePageState extends State<HomePage> {
           : null,
       floatingActionButton: _loaded
           ? FloatingActionButton.extended(
-              onPressed: () => _openForm(),
+              onPressed: _currentPage == 4
+                  ? () {
+                      final lunch = _lunchKey.currentState;
+                      if (lunch != null) {
+                        lunch._openEntry();
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Lunch is still loading.')),
+                        );
+                      }
+                    }
+                  : () => _openForm(),
               icon: const Icon(Icons.add),
-              label: const Text('Fill-up'),
+              label: Text(_currentPage == 4 ? 'Add lunch' : 'Fill-up'),
             )
           : null,
       body: !_loaded
           ? _StartupLoadingScreen(
-              progress: _loadingProgress,
               error: _loadError,
               onRetry: _retryLoad,
             )
@@ -797,17 +878,21 @@ class _HomePageState extends State<HomePage> {
                                                       .onSurfaceVariant,
                                             ),
                                             const SizedBox(height: 2),
-                                            Text(
-                                              _pageNames[index],
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .labelSmall
-                                                  ?.copyWith(
-                                                    color: index == _currentPage
-                                                        ? selectedPageColor
-                                                        : colorScheme
-                                                            .onSurfaceVariant,
-                                                  ),
+                                            FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              child: Text(
+                                                _pageNames[index],
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .labelSmall
+                                                    ?.copyWith(
+                                                      color: index ==
+                                                              _currentPage
+                                                          ? selectedPageColor
+                                                          : colorScheme
+                                                              .onSurfaceVariant,
+                                                    ),
+                                              ),
                                             ),
                                           ],
                                         ),
@@ -837,22 +922,56 @@ class _HomePageState extends State<HomePage> {
                         carouselController: _carouselController,
                         itemCount: _pageNames.length,
                         itemBuilder: (context, index, pageIndex) {
+                          final generation = _dataGeneration;
                           final page = switch (index) {
                             0 => _buildLog(),
                             1 => _buildSummary(),
-                            2 => ChartsPage(
+                            2 => ChartsPage._withLunch(
                                 key: ValueKey('charts-$_dataGeneration'),
                                 entries: _entries,
                                 distances: _distances,
+                                includeLunch: _includeLunch,
+                                lunchEntries: _lunchEntries,
+                                lunchLoadError: _lunchLoadError,
+                                onRetryLunch: _retryLunchLoad,
+                                onIncludeLunchChanged: _setIncludeLunch,
                               ),
-                            _ => PumpPhotosPage(
+                            3 => PumpPhotosPage(
                                 key: ValueKey('photos-$_dataGeneration'),
                                 isActive: index == _currentPage,
+                              ),
+                            _ => LunchPage._withUpdates(
+                                key: _lunchKey,
+                                onEntriesChanged: (entries) {
+                                  if (!mounted || generation != _dataGeneration) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    _lunchEntries = entries;
+                                    _lunchLoadError = null;
+                                  });
+                                },
                               ),
                           };
                           return SizedBox(
                             width: constraints.maxWidth,
-                            child: page,
+                            child: index == 4
+                                ? page
+                                : _StaggeredPage(
+                                    key: ValueKey(
+                                        'reveal-$index-$_dataGeneration'),
+                                    active: index == _currentPage,
+                                    count: switch (index) {
+                                      0 => math.max(1, _entries.length),
+                                      1 => _summaryRevealCount,
+                                      2 =>
+                                        _includeLunch && _lunchLoadError != null
+                                            ? 2
+                                            : 5,
+                                      _ => 3,
+                                    },
+                                    child: page,
+                                  ),
                           );
                         },
                         options: CarouselOptions(
@@ -1136,7 +1255,13 @@ class _HomePageState extends State<HomePage> {
 
   /// Builds the newest-first fill-up list for the Log tab.
   Widget _buildLog() {
-    if (_entries.isEmpty) return const _EmptyState();
+    if (_entries.isEmpty) {
+      return const _PageReveal(
+        key: ValueKey('reveal-log-empty'),
+        index: 0,
+        child: _EmptyState(),
+      );
+    }
     final distances = _distances;
     final list = _chronological.reversed.toList();
     final odometerCounts = <double, int>{};
@@ -1152,73 +1277,77 @@ class _HomePageState extends State<HomePage> {
         final e = list[i];
         final dist = distances[e.id];
         final eff = dist != null ? dist / e.volume : null;
-        return Dismissible(
-          key: ValueKey(e.id),
-          direction: DismissDirection.endToStart,
-          background: Container(
-            color: Theme.of(context).colorScheme.errorContainer,
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: 24),
-            child: Icon(Icons.delete,
-                color: Theme.of(context).colorScheme.onErrorContainer),
-          ),
-          onDismissed: (_) => _delete(e),
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? Theme.of(context).colorScheme.secondary
-                  : Theme.of(context).colorScheme.primary,
-              borderRadius: BorderRadius.circular(15),
+        return _PageReveal(
+          key: ValueKey('reveal-${e.id}'),
+          index: i,
+          child: Dismissible(
+            key: ValueKey(e.id),
+            direction: DismissDirection.endToStart,
+            background: Container(
+              color: Theme.of(context).colorScheme.errorContainer,
+              alignment: Alignment.centerRight,
+              padding: const EdgeInsets.only(right: 24),
+              child: Icon(Icons.delete,
+                  color: Theme.of(context).colorScheme.onErrorContainer),
             ),
+            onDismissed: (_) => _delete(e),
             child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(13),
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? Theme.of(context).colorScheme.secondary
+                    : Theme.of(context).colorScheme.primary,
+                borderRadius: BorderRadius.circular(15),
               ),
-              child: Material(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(13),
-                clipBehavior: Clip.antiAlias,
-                child: ListTile(
-                  onTap: () => _openForm(e),
-                  title: Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(
-                        '${_dateFmt.format(e.date)}  ·  ${_money.format(e.total)}',
-                      ),
-                      if (odometerCounts[e.odometer]! > 1)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade700,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text(
-                            'DUPLICATE',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Material(
+                  color: Theme.of(context).colorScheme.surface,
+                  borderRadius: BorderRadius.circular(13),
+                  clipBehavior: Clip.antiAlias,
+                  child: ListTile(
+                    onTap: () => _openForm(e),
+                    title: Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          '${_dateFmt.format(e.date)}  ·  ${_money.format(e.total)}',
+                        ),
+                        if (odometerCounts[e.odometer]! > 1)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade700,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'DUPLICATE',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
+                    subtitle: Text(
+                      '${_num1.format(e.odometer)} $kDistanceUnit odometer\n'
+                      '${_num3.format(e.volume)} $kVolumeUnit @ ${_money.format(e.price)}/$kVolumeUnit'
+                      '${dist != null ? '\n${_num1.format(dist)} $kDistanceUnit since last  ·  ${fmtEfficiency(eff)}' : ''}',
+                    ),
+                    isThreeLine: true,
+                    trailing: const Icon(Icons.edit_outlined, size: 18),
                   ),
-                  subtitle: Text(
-                    '${_num1.format(e.odometer)} $kDistanceUnit odometer\n'
-                    '${_num3.format(e.volume)} $kVolumeUnit @ ${_money.format(e.price)}/$kVolumeUnit'
-                    '${dist != null ? '\n${_num1.format(dist)} $kDistanceUnit since last  ·  ${fmtEfficiency(eff)}' : ''}',
-                  ),
-                  isThreeLine: true,
-                  trailing: const Icon(Icons.edit_outlined, size: 18),
                 ),
               ),
             ),
@@ -1230,60 +1359,228 @@ class _HomePageState extends State<HomePage> {
 
   // ---------------- Totals tab ----------------
 
+  int get _summaryRevealCount {
+    if (_includeLunch && _lunchLoadError != null) return 2;
+    if (_entries.isEmpty && (!_includeLunch || _lunchEntries.isEmpty)) return 2;
+    final months = {
+      for (final month in _monthGroups) month.month,
+      if (_includeLunch)
+        for (final entry in _lunchEntries)
+          DateTime(entry.date.year, entry.date.month),
+    };
+    return months.length + 2;
+  }
+
   /// Builds overall, monthly, and weekly fuel statistics.
   Widget _buildSummary() {
-    if (_entries.isEmpty) return const _EmptyState();
+    final control = _LunchInclusionControl(
+      key: const ValueKey('include-lunch-totals'),
+      included: _includeLunch,
+      onChanged: _setIncludeLunch,
+    );
+    if (_includeLunch && _lunchLoadError != null) {
+      return ListView(
+        key: const ValueKey('totals-scroll'),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+        children: [
+          _PageReveal(
+            index: 0,
+            child: _LunchDataError(
+                error: _lunchLoadError!, onRetry: _retryLunchLoad),
+          ),
+          const SizedBox(height: 16),
+          _PageReveal(index: 1, child: control),
+        ],
+      );
+    }
+    if (_entries.isEmpty && (!_includeLunch || _lunchEntries.isEmpty)) {
+      return ListView(
+        key: const ValueKey('totals-scroll'),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+        children: [
+          const _PageReveal(
+            key: ValueKey('reveal-totals-empty'),
+            index: 0,
+            child: _EmptyState(),
+          ),
+          _PageReveal(
+            key: const ValueKey('reveal-totals-control'),
+            index: 1,
+            child: control,
+          ),
+        ],
+      );
+    }
     final distances = _distances;
     final months = _monthGroups;
     final overall = Stats.from(_entries, distances);
 
+    if (_includeLunch) {
+      final byMonth = {for (final month in months) month.month: month};
+      final monthKeys = {
+        ...byMonth.keys,
+        for (final entry in _lunchEntries)
+          DateTime(entry.date.year, entry.date.month),
+      }.toList()
+        ..sort((a, b) => b.compareTo(a));
+      return ListView(
+        key: const ValueKey('totals-scroll'),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
+        children: [
+          _PageReveal(
+            key: const ValueKey('reveal-totals-all'),
+            index: 0,
+            child: Card(
+              color: Theme.of(context).colorScheme.primaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('All time',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    _StatsWrap(
+                        stats: overall, lunchSpent: _lunchTotal(_lunchEntries)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          for (var i = 0; i < monthKeys.length; i++)
+            _PageReveal(
+              key: ValueKey('reveal-totals-month-$i'),
+              index: i + 1,
+              child: _buildCombinedMonth(
+                  monthKeys[i], byMonth[monthKeys[i]], distances, i == 0),
+            ),
+          const SizedBox(height: 16),
+          _PageReveal(
+            key: const ValueKey('reveal-totals-control'),
+            index: monthKeys.length + 1,
+            child: control,
+          ),
+        ],
+      );
+    }
+
     return ListView(
+      key: const ValueKey('totals-scroll'),
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
       children: [
-        Card(
-          color: Theme.of(context).colorScheme.primaryContainer,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('All time',
-                    style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                _StatsWrap(stats: overall),
-              ],
+        _PageReveal(
+          key: const ValueKey('reveal-totals-all'),
+          index: 0,
+          child: Card(
+            color: Theme.of(context).colorScheme.primaryContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('All time',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  _StatsWrap(stats: overall),
+                ],
+              ),
             ),
           ),
         ),
         for (var i = 0; i < months.length; i++)
-          Card(
-            color: Theme.of(context).colorScheme.surface,
-            clipBehavior: Clip.antiAlias,
-            child: ExpansionTile(
-              initiallyExpanded: i == 0,
-              shape: const Border(),
-              collapsedShape: const Border(),
-              title: Text(_monthFmt.format(months[i].month),
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(
-                  '${_money.format(Stats.from(months[i].entries, distances).spent)}  ·  '
-                  '${months[i].entries.length} fill-up${months[i].entries.length == 1 ? '' : 's'}'),
-              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              expandedCrossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Monthly total',
-                    style: Theme.of(context).textTheme.labelLarge),
-                const SizedBox(height: 6),
-                _StatsWrap(stats: Stats.from(months[i].entries, distances)),
-                const SizedBox(height: 16),
-                Text('By week', style: Theme.of(context).textTheme.labelLarge),
-                const SizedBox(height: 4),
-                for (final w in months[i].weeks)
-                  _WeekRow(week: w, stats: Stats.from(w.entries, distances)),
-              ],
+          _PageReveal(
+            key: ValueKey('reveal-totals-month-$i'),
+            index: i + 1,
+            child: Card(
+              color: Theme.of(context).colorScheme.surface,
+              clipBehavior: Clip.antiAlias,
+              child: ExpansionTile(
+                initiallyExpanded: i == 0,
+                shape: const Border(),
+                collapsedShape: const Border(),
+                title: Text(_monthFmt.format(months[i].month),
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(
+                    '${_money.format(Stats.from(months[i].entries, distances).spent)}  ·  '
+                    '${months[i].entries.length} fill-up${months[i].entries.length == 1 ? '' : 's'}'),
+                childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Monthly total',
+                      style: Theme.of(context).textTheme.labelLarge),
+                  const SizedBox(height: 6),
+                  _StatsWrap(stats: Stats.from(months[i].entries, distances)),
+                  const SizedBox(height: 16),
+                  Text('By week',
+                      style: Theme.of(context).textTheme.labelLarge),
+                  const SizedBox(height: 4),
+                  for (final w in months[i].weeks)
+                    _WeekRow(week: w, stats: Stats.from(w.entries, distances)),
+                ],
+              ),
             ),
           ),
+        const SizedBox(height: 16),
+        _PageReveal(
+          key: const ValueKey('reveal-totals-control'),
+          index: months.length + 1,
+          child: control,
+        ),
       ],
+    );
+  }
+
+  Widget _buildCombinedMonth(
+    DateTime month,
+    MonthGroup? fuel,
+    Map<String, double> distances,
+    bool expanded,
+  ) {
+    final lunch = _lunchEntries
+        .where((entry) =>
+            entry.date.year == month.year && entry.date.month == month.month)
+        .toList();
+    final fuelEntries = fuel?.entries ?? <FuelEntry>[];
+    final stats = Stats.from(fuelEntries, distances);
+    final lunchTotal = _lunchTotal(lunch);
+    final weeks = {
+      for (final week in fuel?.weeks ?? <WeekGroup>[]) week.weekStart: week
+    };
+    final weekKeys = {
+      ...weeks.keys,
+      for (final entry in lunch) _lunchWeek(entry.date),
+    }.toList()
+      ..sort((a, b) => b.compareTo(a));
+    return Card(
+      color: Theme.of(context).colorScheme.surface,
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        initiallyExpanded: expanded,
+        shape: const Border(),
+        collapsedShape: const Border(),
+        title: Text(_monthFmt.format(month),
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text('${_money.format(stats.spent + lunchTotal)}  ·  '
+            '${fuelEntries.length} fill-up${fuelEntries.length == 1 ? '' : 's'}'),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Monthly total', style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 6),
+          _StatsWrap(stats: stats, lunchSpent: lunchTotal),
+          const SizedBox(height: 16),
+          Text('By week', style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 4),
+          for (final start in weekKeys)
+            _WeekRow(
+              week: weeks[start] ?? WeekGroup(start, []),
+              stats:
+                  Stats.from(weeks[start]?.entries ?? <FuelEntry>[], distances),
+              lunchSpent: _lunchTotal(
+                  lunch.where((entry) => _lunchWeek(entry.date) == start)),
+            ),
+        ],
+      ),
     );
   }
 }

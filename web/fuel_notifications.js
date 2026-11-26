@@ -1,5 +1,6 @@
 (() => {
   const tag = 'fuel-log-custom-chart';
+  const lunchTag = 'fuel-log-lunch';
   const scope = new URL('fuel-notifications/', document.baseURI).href;
 
   function chartImage(data) {
@@ -33,7 +34,8 @@
     const negative = first < 0 || second < 0;
     const total = first == null || second == null ? 0 : first + second;
     const share = negative || total === 0 ? 0 : first / total;
-    context.fillStyle = '#003566';
+    context.fillStyle = data.kind === 'lunch' &&
+      (first == null || second == null || total === 0) ? '#cccccc' : '#003566';
     context.beginPath();
     context.arc(464, 120, 92, 0, Math.PI * 2);
     context.fill();
@@ -80,6 +82,14 @@
     return registration;
   }
 
+  async function cancelNotification(notificationTag) {
+    if (!('serviceWorker' in navigator)) return;
+    const registration = await navigator.serviceWorker.getRegistration(scope);
+    if (!registration) return;
+    const notifications = await registration.getNotifications({tag: notificationTag});
+    notifications.forEach(notification => notification.close());
+  }
+
   window.fuelLogNotifications = {
     requestPermission() {
       if (!window.isSecureContext || !('Notification' in window)) {
@@ -95,7 +105,7 @@
       const registration = await activeRegistration();
       const options = {
         body: `${data.fillUp} | ${data.firstLabel}: ${data.firstAmount} | ${data.secondLabel}: ${data.secondAmount}`,
-        tag,
+        tag: data.kind === 'lunch' ? lunchTag : tag,
       };
       try {
         options.image = chartImage(data);
@@ -112,11 +122,10 @@
       }
     },
     async cancel() {
-      if (!('serviceWorker' in navigator)) return;
-      const registration = await navigator.serviceWorker.getRegistration(scope);
-      if (!registration) return;
-      const notifications = await registration.getNotifications({tag});
-      notifications.forEach(notification => notification.close());
+      await cancelNotification(tag);
+    },
+    async cancelLunch() {
+      await cancelNotification(lunchTag);
     },
   };
 })();
