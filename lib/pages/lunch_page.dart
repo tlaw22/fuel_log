@@ -87,6 +87,7 @@ class LunchPage extends StatefulWidget {
 }
 
 class _LunchPageState extends State<LunchPage> {
+  final _infoTooltipKey = GlobalKey<TooltipState>();
   List<String> _restaurants = [];
   List<_LunchEntry> _entries = [];
   double? _budget;
@@ -390,7 +391,23 @@ class _LunchPageState extends State<LunchPage> {
       key: const ValueKey('lunch-scroll'),
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
       children: [
-        Text('Lunch', style: Theme.of(context).textTheme.headlineSmall),
+        Row(
+          children: [
+            Text('Lunch', style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(width: 8),
+            Tooltip(
+              key: _infoTooltipKey,
+              message: "The lunch calculator is included because you can't "
+                  'always pack your lunch while traveling.',
+              triggerMode: TooltipTriggerMode.manual,
+              child: IconButton.outlined(
+                onPressed: () =>
+                    _infoTooltipKey.currentState?.ensureTooltipVisible(),
+                icon: const Icon(Icons.help_outline, size: 12),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerLeft,

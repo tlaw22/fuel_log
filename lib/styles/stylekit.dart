@@ -25,8 +25,8 @@ List<ThemePalette> _palettesFor(bool isDark) => isDark
       ]
     : const [ThemePalette.classic, ThemePalette.sage, ThemePalette.rose];
 
-String _paletteName(ThemePalette palette) => switch (palette) {
-      ThemePalette.classic => 'Classic',
+String _paletteName(ThemePalette palette, bool isDark) => switch (palette) {
+      ThemePalette.classic => isDark ? 'GitHub Theme' : 'Khaki',
       ThemePalette.forest => 'Forest',
       ThemePalette.purpleRaindrops => 'Purple Raindrops',
       ThemePalette.sage => 'Sage',
@@ -245,13 +245,68 @@ class _ThemePaletteMenu extends StatelessWidget {
       initialValue: selected,
       onSelected: onSelected,
       itemBuilder: (context) => [
+        PopupMenuItem<ThemePalette>(
+          enabled: false,
+          height: 40,
+          child: Semantics(
+            header: true,
+            child: Text(
+              isDark ? 'Dark themes' : 'Light themes',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+          ),
+        ),
         for (final palette in _palettesFor(isDark))
-          CheckedPopupMenuItem<ThemePalette>(
-            value: palette,
-            checked: palette == selected,
-            child: Text(_paletteName(palette)),
+          _OutlinedPopupMenuEntry(
+            item: CheckedPopupMenuItem<ThemePalette>(
+              value: palette,
+              checked: palette == selected,
+              height: 56,
+              child: Text(_paletteName(palette, isDark)),
+            ),
           ),
       ],
+    );
+  }
+}
+
+class _OutlinedPopupMenuEntry<T> extends PopupMenuEntry<T> {
+  final PopupMenuItem<T> item;
+
+  const _OutlinedPopupMenuEntry({required this.item});
+
+  @override
+  double get height => item.height + 8;
+
+  @override
+  bool represents(T? value) => item.represents(value);
+
+  @override
+  State<_OutlinedPopupMenuEntry<T>> createState() =>
+      _OutlinedPopupMenuEntryState<T>();
+}
+
+class _OutlinedPopupMenuEntryState<T>
+    extends State<_OutlinedPopupMenuEntry<T>> {
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: scheme.brightness == Brightness.dark
+                ? scheme.primary
+                : scheme.onSurface,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: widget.item,
+      ),
     );
   }
 }

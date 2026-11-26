@@ -25,6 +25,36 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('lunch help button shows the travel explanation', (tester) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    await openHomeLunch(tester);
+
+    final heading = find.descendant(
+      of: find.byKey(const ValueKey('lunch-scroll')),
+      matching: find.text('Lunch'),
+    );
+    final help = find.byIcon(Icons.help_outline);
+    expect(help, findsOneWidget);
+    expect(tester.getSize(help), const Size(12, 12));
+    final button = find.ancestor(of: help, matching: find.byType(IconButton));
+    expect(tester.getSize(button).width, greaterThanOrEqualTo(48));
+    expect(tester.getSize(button).height, greaterThanOrEqualTo(48));
+    expect(tester.getTopLeft(help).dx,
+        greaterThan(tester.getTopRight(heading).dx));
+    await tester.tap(help);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      find.text("The lunch calculator is included because you can't always "
+          'pack your lunch while traveling.'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('restaurant search, custom entry and recurring budget persist',
       (tester) async {
     tester.view.physicalSize = const Size(800, 1800);

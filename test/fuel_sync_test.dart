@@ -181,7 +181,10 @@ void main() {
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(320, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({
+      'fuel_dark_palette_v1': 'classic',
+      'fuel_light_palette_v1': 'classic',
+    });
     await tester.pumpWidget(const FuelLogApp());
     await _pumpStartupToCompletion(tester);
 
@@ -201,15 +204,63 @@ void main() {
     ThemeData currentTheme() =>
         tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!;
 
+    void expectOutlinedOptions(List<String> labels) {
+      final scheme = currentTheme().colorScheme;
+      final expectedColor =
+          scheme.brightness == Brightness.dark ? scheme.primary : scheme.onSurface;
+      for (final label in labels) {
+        final item = find.ancestor(
+          of: find.text(label),
+          matching: find.byType(CheckedPopupMenuItem<ThemePalette>),
+        );
+        final outline = find.ancestor(
+          of: item,
+          matching: find.byWidgetPredicate((widget) =>
+              widget is DecoratedBox &&
+              widget.decoration is BoxDecoration &&
+              (widget.decoration as BoxDecoration).border ==
+                  Border.all(color: expectedColor)),
+        );
+        expect(outline, findsOneWidget, reason: label);
+        final outlineRect = tester.getRect(outline);
+        final itemRect = tester.getRect(item);
+        expect(outlineRect.left, lessThanOrEqualTo(itemRect.left));
+        expect(outlineRect.right, greaterThanOrEqualTo(itemRect.right));
+        expect(outlineRect.top, lessThanOrEqualTo(itemRect.top));
+        expect(outlineRect.bottom, greaterThanOrEqualTo(itemRect.bottom));
+      }
+    }
+
     await openMenu();
-    expect(find.text('Classic'), findsOneWidget);
+    expectOutlinedOptions(['GitHub Theme', 'Forest', 'Purple Raindrops']);
+    expect(find.text('Dark themes'), findsOneWidget);
+    expect(find.text('Light themes'), findsNothing);
+    expect(tester.getTopLeft(find.text('Dark themes')).dy,
+        lessThan(tester.getTopLeft(find.text('GitHub Theme')).dy));
+    await tester.tap(find.text('Dark themes'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(find.text('Forest'), findsOneWidget);
+    expect(find.text('GitHub Theme'), findsOneWidget);
+    expect(find.text('Khaki'), findsNothing);
+    expect(
+      tester.widget<CheckedPopupMenuItem<ThemePalette>>(find.ancestor(
+        of: find.text('GitHub Theme'),
+        matching: find.byType(CheckedPopupMenuItem<ThemePalette>),
+      )).checked,
+      isTrue,
+    );
     expect(find.text('Forest'), findsOneWidget);
     expect(find.text('Purple Raindrops'), findsOneWidget);
     expect(find.text('Sage'), findsNothing);
+    await selectPalette('GitHub Theme');
+    expect((await SharedPreferences.getInstance())
+        .getString('fuel_dark_palette_v1'), 'classic');
+    await openMenu();
     await selectPalette('Forest');
     expect(currentTheme().scaffoldBackgroundColor,
         buildTheme(palette: ThemePalette.forest).scaffoldBackgroundColor);
     await openMenu();
+    expectOutlinedOptions(['GitHub Theme', 'Forest', 'Purple Raindrops']);
     await selectPalette('Purple Raindrops');
     expect(currentTheme().scaffoldBackgroundColor,
         buildTheme(palette: ThemePalette.purpleRaindrops).scaffoldBackgroundColor);
@@ -218,14 +269,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(currentTheme().brightness, Brightness.light);
     await openMenu();
-    expect(find.text('Classic'), findsOneWidget);
+    expectOutlinedOptions(['Khaki', 'Sage', 'Rose']);
+    expect(find.text('Light themes'), findsOneWidget);
+    expect(find.text('Dark themes'), findsNothing);
+    expect(tester.getTopLeft(find.text('Light themes')).dy,
+        lessThan(tester.getTopLeft(find.text('Khaki')).dy));
+    expect(find.text('Khaki'), findsOneWidget);
+    expect(find.text('GitHub Theme'), findsNothing);
+    expect(
+      tester.widget<CheckedPopupMenuItem<ThemePalette>>(find.ancestor(
+        of: find.text('Khaki'),
+        matching: find.byType(CheckedPopupMenuItem<ThemePalette>),
+      )).checked,
+      isTrue,
+    );
     expect(find.text('Sage'), findsOneWidget);
     expect(find.text('Rose'), findsOneWidget);
     expect(find.text('Purple Raindrops'), findsNothing);
+    await selectPalette('Khaki');
+    expect((await SharedPreferences.getInstance())
+        .getString('fuel_light_palette_v1'), 'classic');
+    await openMenu();
     await selectPalette('Sage');
     expect(currentTheme().scaffoldBackgroundColor,
         buildTheme(isDark: false, palette: ThemePalette.sage).scaffoldBackgroundColor);
     await openMenu();
+    expectOutlinedOptions(['Khaki', 'Sage', 'Rose']);
     await selectPalette('Rose');
 
     await tester.tap(find.byTooltip('Switch to dark theme'));
@@ -239,11 +308,15 @@ void main() {
     await _pumpStartupToCompletion(tester);
     expect(currentTheme().scaffoldBackgroundColor,
         buildTheme(palette: ThemePalette.purpleRaindrops).scaffoldBackgroundColor);
+    await openMenu();
+    expectOutlinedOptions(['GitHub Theme', 'Forest', 'Purple Raindrops']);
+    await selectPalette('Purple Raindrops');
     await tester.tap(find.byTooltip('Switch to light theme'));
     await tester.pumpAndSettle();
     expect(currentTheme().scaffoldBackgroundColor,
         buildTheme(isDark: false, palette: ThemePalette.rose).scaffoldBackgroundColor);
     await openMenu();
+    expectOutlinedOptions(['Khaki', 'Sage', 'Rose']);
     final rose = tester.widget<CheckedPopupMenuItem<ThemePalette>>(
       find.ancestor(
         of: find.text('Rose'),
@@ -822,6 +895,70 @@ void main() {
     expect(find.text('Wipe Data'), findsOneWidget);
   });
 
+  testWidgets('AppBar menu outlines each action in every palette',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(320, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    for (final (isDark, palette) in [
+      (true, ThemePalette.classic),
+      (true, ThemePalette.forest),
+      (true, ThemePalette.purpleRaindrops),
+      (false, ThemePalette.classic),
+      (false, ThemePalette.sage),
+      (false, ThemePalette.rose),
+    ]) {
+      SharedPreferences.setMockInitialValues({});
+      final theme = buildTheme(isDark: isDark, palette: palette);
+      await tester.pumpWidget(MaterialApp(
+        key: ValueKey(palette),
+        theme: theme,
+        home: HomePage(
+          bluetoothShareEnabled: false,
+          bluetoothSharePageBuilder: (snapshot, onSnapshotReceived) =>
+              const Text('Bluetooth File Sharing'),
+        ),
+      ));
+      await _pumpStartupToCompletion(tester);
+      await tester.tap(find.byTooltip('App menu'));
+      await tester.pumpAndSettle();
+
+      final color = isDark ? theme.colorScheme.primary : theme.colorScheme.onSurface;
+      for (final label in [
+        'Bluetooth Share',
+        'Reports',
+        'Load CSV',
+        'Save CSV',
+        'Share CSV backup',
+        'About',
+        'Wipe Data',
+      ]) {
+        final item = find.ancestor(
+          of: find.text(label),
+          matching: find.byWidgetPredicate((widget) => widget is PopupMenuItem),
+        );
+        final outline = find.ancestor(
+          of: item,
+          matching: find.byWidgetPredicate((widget) =>
+              widget is DecoratedBox &&
+              widget.decoration is BoxDecoration &&
+              (widget.decoration as BoxDecoration).border ==
+                  Border.all(color: color)),
+        );
+        expect(item, findsOneWidget, reason: '$palette: $label');
+        expect(outline, findsOneWidget, reason: '$palette: $label');
+        expect(tester.getRect(outline), tester.getRect(item));
+      }
+
+      await tester.ensureVisible(find.text('Wipe Data'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Wipe Data'));
+      await tester.pumpAndSettle();
+      expect(find.text('Wipe data'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+    }
+  });
+
   testWidgets('Windows CSV actions open import and save pickers',
       (tester) async {
     const fileSelectorChannel =
@@ -1028,6 +1165,53 @@ void main() {
         startsWith('\n\nA Flutter app for tracking fuel fill-ups'));
     expect(body.style?.fontFamily, isNull);
     expect('${heading.text}${body.text}', await rootBundle.loadString('README.md'));
+  });
+
+  testWidgets('About donation button opens a placeholder and returns',
+      (tester) async {
+    const channel = MethodChannel('plugins.flutter.io/url_launcher');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    MethodCall? launch;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      launch = call;
+      return true;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.runAsync(() => rootBundle.loadString('README.md'));
+
+    for (final width in [320.0, 800.0]) {
+      await tester.binding.setSurfaceSize(Size(width, 720));
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(MaterialApp(
+        key: ValueKey(width),
+        home: const HomePage(),
+      ));
+      await _pumpStartupToCompletion(tester);
+      await tester.tap(find.byTooltip('App menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('About'));
+      await tester.pumpAndSettle();
+
+      final github = find.widgetWithText(OutlinedButton, 'View project on GitHub');
+      final donate = find.widgetWithText(OutlinedButton, 'Donate');
+      expect(tester.getRect(donate).left, greaterThan(tester.getRect(github).right));
+      expect(
+        find.descendant(of: donate, matching: find.byIcon(Icons.attach_money)),
+        findsOneWidget,
+      );
+      await tester.tap(donate);
+      await tester.pumpAndSettle();
+      expect(find.text('Donation page coming soon.'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('About Fuel Log'), findsOneWidget);
+      await tester.tap(github);
+      await tester.pump();
+      expect(launch?.arguments['url'], 'https://github.com/tlaw22/fuel_log');
+      expect(tester.takeException(), isNull);
+    }
   });
 
   testWidgets('About page download button opens the releases page',

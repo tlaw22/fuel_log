@@ -69,20 +69,39 @@ class _AboutSheetState extends State<AboutSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                OutlinedButton(
-                  onPressed: _openProjectPage,
-                  child: const Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'View project on GitHub',
-                          textAlign: TextAlign.center,
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _openProjectPage,
+                        child: const Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'View project on GitHub',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                            SizedBox(width: 12),
+                            FaIcon(FontAwesomeIcons.github, size: 36),
+                          ],
                         ),
                       ),
-                      SizedBox(width: 12),
-                      FaIcon(FontAwesomeIcons.github, size: 36),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const _DonatePage(),
+                        ),
+                      ),
+                      icon: const Icon(Icons.attach_money),
+                      label: const Text('Donate'),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 SelectableText(
@@ -140,4 +159,14 @@ class _AboutSheetState extends State<AboutSheet> {
       ),
     );
   }
+}
+
+class _DonatePage extends StatelessWidget {
+  const _DonatePage();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Donate')),
+        body: const Center(child: Text('Donation page coming soon.')),
+      );
 }

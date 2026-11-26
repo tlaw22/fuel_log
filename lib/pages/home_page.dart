@@ -728,7 +728,7 @@ class _HomePageState extends State<HomePage> {
                       break;
                   }
                 },
-                itemBuilder: (context) => [
+                itemBuilder: (context) => <PopupMenuItem<_HomeMenuAction>>[
                   if (!kIsWeb && widget.bluetoothSharePageBuilder != null)
                     PopupMenuItem(
                       enabled: widget.bluetoothShareEnabled,
@@ -780,7 +780,7 @@ class _HomePageState extends State<HomePage> {
                       label: 'Wipe Data',
                     ),
                   ),
-                ],
+                ].map((item) => _OutlinedPopupMenuEntry(item: item)).toList(),
               ),
               title: const Text(
                 'Fuel Fill-ups Log',
