@@ -4,7 +4,7 @@ A Flutter app for tracking fuel fill-ups, spending, totals, and fuel efficiency
 on Android and Windows.
 
 Demo of app available on YouTube.
-[Watch the demo video - LINK](https://youtube.com/shorts/qNGNHvHNSpI?si=G2GmWQhQoJeuR-hz)
+[Live Web App Demo - LINK](http://discopro.cc/apps/fuelup/)
 
 ## Main sections
 
