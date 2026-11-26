@@ -3,8 +3,9 @@
 A Flutter app for tracking fuel fill-ups, spending, totals, and fuel efficiency
 on Android and Windows.
 
-Demo of app available on YouTube.
-[Watch the demo video - LINK](https://youtube.com/shorts/qNGNHvHNSpI?si=G2GmWQhQoJeuR-hz)
+Demo of app available:
+
+[ LINK](http://discopro.cc/apps/fuelup/)
 
 ## Main sections
 
@@ -130,13 +131,12 @@ compares any two financial amounts chosen from its dropdowns, and remembers
 those selections. A missing budget or two zero amounts show "No data";
 negative amounts show "Negative amount" instead of a percentage.
 
-Saving lunch from the Lunch button posts a separate notification with the
-purchase price and the selected day's lunch spending versus the remaining daily
-budget. The pie fills when over budget; without a budget, it shows "No data".
-The lunch notification does not replace the fill-up notification.
+
 Saving a fill-up posts a custom-chart notification on Android, Windows, and
 supported browsers, with the amount purchased and total cost in the notification
 title.
+
+
 Android displays the comparison pie; browser notifications include it when
 supported. Windows shows a pie for lunch and a text summary for fill-ups. Browsers ask
 for permission on Save and require HTTPS or localhost. Windows uses system
@@ -156,14 +156,10 @@ phone and tap **Wait for sender** first. On the other phone choose **Sender**
 and tap **Connect and send log**. The Receiver merges the received entries and
 deletions; the most recently edited version wins when entries conflict.
 
-The connection uses Android's secure Bluetooth pairing and transfers only
-after a user starts the sender/receiver flow. The standard release supports
-Bluetooth sharing; its controls are disabled in the F-Droid build. A pairing
-slideshow is available from the sharing page.
-
 Your log stays on this device unless you explicitly use Bluetooth sharing or
 export or share a CSV backup.
 
+<<<<<<< HEAD
 ## Install the web app
 
 On phones, Chrome, Edge, and Safari can show an invitation to install FuelLog.
@@ -181,3 +177,5 @@ The launcher icons are generated from `lib/img/app-icon.jpg` with
 `dart run flutter_launcher_icons`. Linux bundles the generated 512-pixel web
 icon for its window; desktop launcher integration depends on the Linux package
 and desktop environment.
+=======
+>>>>>>> be3b6f082786ee613d663888e7d3c721101a9e48
