@@ -5,7 +5,7 @@ on Android and Windows.
 
 Demo of app available:
 
-http://discopro.cc/apps/fuelup/ - LINK](http://discopro.cc/apps/fuelup/)
+[ LINK](http://discopro.cc/apps/fuelup/)
 
 ## Main sections
 
