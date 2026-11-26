@@ -414,6 +414,18 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Expanded(child: _buildGallery()),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: _DownloadPlatforms(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGallery() {
     if (_isAndroidOnlyPlatform) return _buildAndroidOnlyFeature();
     if (!_isAndroid) return _buildExternalGallery();
     return Column(

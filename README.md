@@ -11,19 +11,25 @@ Demo of app available on YouTube.
 The home screen uses one carousel with these sections:
 
 - **Log** - Add, edit, delete, and review fill-up records. Entries with
-  matching odometer readings are marked **DUPLICATE**.
+  matching odometer readings are marked **DUPLICATE**. Pressing **Save** on
+  a new fill-up plays a coin-drop sound. Use the **MUTE** selector in the
+  new-fill-up form to turn the sound off or on; the setting is remembered.
 - **Totals** - Review all-time spending, monthly totals, weekly totals, fuel
   volume, distance, and efficiency.
-- **Graphs** - Review spending, distance, fuel efficiency, and travel expenses,
+- **Charts** - Review spending, distance, fuel efficiency, and travel expenses,
   and set a monthly budget.
 - **Photos** - Browse pump photos previously saved on Android.
+
+The About and Photos pages link to downloads for other platforms.
 
 Use the carousel labels or left/right arrows to move between sections.
 
 ## Theme
 
-The AppBar theme icon switches between the dark theme and the light theme. The
-selected theme is saved locally and restored the next time the app starts.
+The AppBar theme icon switches between dark and light modes. The palette icon
+offers three choices for the active mode, including Purple Raindrops in dark
+mode. The mode and each mode's selected palette are saved locally and restored
+the next time the app starts.
 
 ## Pump photos (Android)
 
@@ -75,20 +81,29 @@ CSVs through the browser.
 Use **Save CSV** in the AppBar menu to choose a destination in the system
 save-file dialog.
 
-## Graphs
+## Charts
 
-The Graphs page saves monthly gross income, insurance, and car payments on this
+The Charts page saves monthly gross income, insurance, and car payments on this
 device. Its travel-expense comparison includes fuel purchases from the log plus
 the saved insurance and car payments, compared with the previous calendar
-month. Missing previous-month values are shown as zero. Each pie shows the
+month. Missing previous-month values are shown as zero. The monthly comparison
+also shows the distance traveled this month. Each pie shows the
 percentages of the two colored portions, in the same order as the figures to
 its left. Spending over budget fills the pie; the actual over-budget amount
-and monthly budget percentage are shown separately. When both months have no
-travel expenses, the comparison shows "No data" instead of percentages.
-On Android, saving a fill-up posts a dismissible travel-expense notification.
-Expand it to see the comparison pie and both monthly totals. Android may ask
-for notification permission; notifications can also be disabled in system
-settings. The notification is removed when app data is wiped.
+and monthly budget percentage are shown separately. The bottom **Custom Chart**
+compares any two financial amounts chosen from its dropdowns, and remembers
+those selections. A missing budget or two zero amounts show "No data";
+negative amounts show "Negative amount" instead of a percentage.
+Saving a fill-up posts a custom-chart notification on Android, Windows, and
+supported browsers, with the amount purchased and total cost in the notification
+title.
+Android displays the comparison pie; browser notifications
+include it when supported, while Windows displays a text summary. Browsers ask
+for permission on Save and require HTTPS or localhost. Windows uses system
+notification settings rather than an app permission prompt. Android may also
+request notification permission. Notifications can be disabled in system or
+browser settings. The app attempts to remove its notification when data is
+wiped; Windows may restrict notification removal for unpackaged apps.
 
 ## Bluetooth file sharing (Android)
 
@@ -108,3 +123,10 @@ slideshow is available from the sharing page.
 
 Your log stays on this device unless you explicitly use Bluetooth sharing or
 export or share a CSV backup.
+
+## App icons
+
+The launcher icons are generated from `lib/img/app-icon.png` with
+`dart run flutter_launcher_icons`. Linux bundles the generated 512-pixel web
+icon for its window; desktop launcher integration depends on the Linux package
+and desktop environment.

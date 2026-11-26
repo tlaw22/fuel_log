@@ -123,6 +123,7 @@ List<List<String>> _decodeCsv(String source) {
 class HomePage extends StatefulWidget {
   final bool isDarkTheme;
   final VoidCallback? onToggleTheme;
+  final Widget? themePaletteMenu;
   final BluetoothSharePageBuilder? bluetoothSharePageBuilder;
   final bool bluetoothShareEnabled;
 
@@ -131,6 +132,7 @@ class HomePage extends StatefulWidget {
     super.key,
     this.isDarkTheme = true,
     this.onToggleTheme,
+    this.themePaletteMenu,
     this.bluetoothSharePageBuilder,
     this.bluetoothShareEnabled = true,
   });
@@ -177,6 +179,7 @@ class _HomeMenuEntry extends StatelessWidget {
 class _HomePageState extends State<HomePage> {
   static const _prefsKey = 'fuel_entries_v1';
   static const _deletedPrefsKey = 'fuel_entries_deleted_v1';
+  static const _soundMutedPrefsKey = 'fuel_save_sound_muted_v1';
   static const _minimumStartupScreenDuration = Duration(milliseconds: 500);
   static const _monthlyDataPrefixes = [
     _monthlyBudgetPrefsKeyPrefix,
@@ -184,7 +187,7 @@ class _HomePageState extends State<HomePage> {
     'fuel_insurance_',
     'fuel_car_payment_',
   ];
-  static const _pageNames = ['Log', 'Totals', 'Graphs', 'Photos'];
+  static const _pageNames = ['Log', 'Totals', 'Charts', 'Photos'];
   static const _pageIcons = [
     Icons.list_alt,
     Icons.bar_chart,
@@ -201,6 +204,9 @@ class _HomePageState extends State<HomePage> {
   int _currentPage = 0;
   int _dataGeneration = 0;
   late final Future<void> _startupVisibilityDelay;
+  AudioPlayer? _saveSoundPlayer;
+  bool _soundMuted = false;
+  Future<void> _soundMuteSaveQueue = Future<void>.value();
 
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -217,11 +223,74 @@ class _HomePageState extends State<HomePage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    final player = _saveSoundPlayer;
+    if (player != null) unawaited(_disposeSaveSound(player));
+    super.dispose();
+  }
+
+  Future<void> _disposeSaveSound(AudioPlayer player) async {
+    try {
+      await player.dispose();
+    } catch (error, stackTrace) {
+      _reportSaveSoundError(error, stackTrace);
+    }
+  }
+
+  void _reportSaveSoundError(Object error, StackTrace stackTrace) {
+    FlutterError.reportError(FlutterErrorDetails(
+      exception: error,
+      stack: stackTrace,
+      library: 'FuelLog save sound',
+    ));
+  }
+
+  Future<void> _playSaveSound() async {
+    try {
+      final player = _saveSoundPlayer ??= AudioPlayer()
+        ..audioCache = AudioCache(prefix: 'lib/assets/sounds/');
+      await player.play(AssetSource('coin-drop.wav'));
+    } catch (error, stackTrace) {
+      _reportSaveSoundError(error, stackTrace);
+    }
+  }
+
+  void _setSoundMuted(bool muted) {
+    _soundMuted = muted;
+    _soundMuteSaveQueue = _soundMuteSaveQueue.then(
+      (_) => _saveSoundMutedPreference(muted),
+    );
+  }
+
+  Future<void> _saveSoundMutedPreference(bool muted) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!await prefs.setBool(_soundMutedPrefsKey, muted)) {
+        throw StateError('The mute preference was not saved.');
+      }
+    } catch (error, stackTrace) {
+      FlutterError.reportError(FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'FuelLog mute preference',
+      ));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not save mute preference: $error'),
+          duration: kAppSnackBarDuration,
+        ),
+      );
+    }
+  }
+
   /// Loads active entries and deleted-entry tombstones from shared preferences.
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (!mounted) return;
+      _soundMuted = prefs.getBool(_soundMutedPrefsKey) ?? false;
       setState(() => _loadingProgress = 0.25);
 
       final raw = prefs.getString(_prefsKey);
@@ -330,12 +399,23 @@ class _HomePageState extends State<HomePage> {
 
   /// Opens the add/edit form and persists a new or changed fuel entry.
   Future<void> _openForm([FuelEntry? existing]) async {
+    Future<Object?>? browserPermission;
+    String? enteredAmount;
     final result = await showModalBottomSheet<FuelEntry>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (sheetContext) => EntryForm(
         existing: existing,
+        onNewSavePressed: () => unawaited(_playSaveSound()),
+        initialSoundMuted: _soundMuted,
+        onSoundMutedChanged: _setSoundMuted,
+        onValidatedSavePressed: (amount) {
+          enteredAmount = amount;
+          if (kIsWeb) {
+            browserPermission = FuelLogNotifications.requestBrowserPermission();
+          }
+        },
         lastOdometer:
             _chronological.isEmpty ? null : _chronological.last.odometer,
         onDelete: existing == null
@@ -367,53 +447,21 @@ class _HomePageState extends State<HomePage> {
       );
       return;
     }
-    if (_isAndroid) await _notifyTravelComparison();
-  }
-
-  Future<void> _notifyTravelComparison() async {
-    try {
-      final now = DateTime.now();
-      final previousMonth = DateTime(now.year, now.month - 1);
-      final prefs = await SharedPreferences.getInstance();
-      double totalFor(DateTime month) {
-        final fuel = _entries
-            .where((entry) =>
-                entry.date.year == month.year &&
-                entry.date.month == month.month)
-            .fold<double>(0, (total, entry) => total + entry.total);
-        return _travelExpense(
-          fuel,
-          prefs.getDouble(_monthlyValueKey('insurance', month)) ?? 0,
-          prefs.getDouble(_monthlyValueKey('car_payment', month)) ?? 0,
-        );
+    if (_isAndroid || _isWindowsOrWeb) {
+      try {
+        if (browserPermission != null) {
+          final permissionError = await browserPermission;
+          if (permissionError != null) throw permissionError;
+        }
+        final amount = enteredAmount;
+        if (amount == null) {
+          throw StateError('The saved fill-up amount was not provided.');
+        }
+        await FuelLogNotifications.showCustomChart(_entries, result, amount);
+      } catch (error) {
+        if (!mounted) return;
+        FuelLogNotifications.reportFailure(context, error);
       }
-
-      final currentTotal = totalFor(now);
-      final previousTotal = totalFor(previousMonth);
-      final posted = await _androidNativeChannel.invokeMethod<bool>(
-        'showTravelNotification',
-        {
-          'currentMonth': _monthFmt.format(now),
-          'previousMonth': _monthFmt.format(previousMonth),
-          'currentAmount': _money.format(currentTotal),
-          'previousAmount': _money.format(previousTotal),
-          'currentTotal': currentTotal,
-          'previousTotal': previousTotal,
-        },
-      );
-      if (posted != true) {
-        throw StateError(
-          'Notifications are disabled. Enable them in Android settings.',
-        );
-      }
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Fill-up saved, but notification failed: $error'),
-          duration: kAppSnackBarDuration,
-        ),
-      );
     }
   }
 
@@ -455,7 +503,7 @@ class _HomePageState extends State<HomePage> {
     if (confirmed != true || !mounted) return;
 
     try {
-      if (Platform.isAndroid) {
+      if (!kIsWeb && Platform.isAndroid) {
         final sdkInt =
             await _androidNativeChannel.invokeMethod<int>('androidSdkInt');
         if (sdkInt == null) {
@@ -487,11 +535,17 @@ class _HomePageState extends State<HomePage> {
         if (deletedReportCount == null) {
           throw StateError('Android did not confirm report deletion.');
         }
-        await _androidNativeChannel.invokeMethod<void>(
-          'cancelTravelNotification',
-        );
+        await FuelLogNotifications.cancel();
       }
 
+      Object? notificationError;
+      if (_isWindowsOrWeb) {
+        try {
+          await FuelLogNotifications.cancel();
+        } catch (error) {
+          notificationError = error;
+        }
+      }
       final prefs = await SharedPreferences.getInstance();
       final keysToRemove = prefs.getKeys().where((key) {
         return key == _prefsKey ||
@@ -511,8 +565,11 @@ class _HomePageState extends State<HomePage> {
         _dataGeneration++;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('App data wiped.'),
+        SnackBar(
+          content: Text(notificationError == null
+              ? 'App data wiped.'
+              : 'App data wiped, but notification could not be removed: '
+                  '$notificationError'),
           duration: kAppSnackBarDuration,
         ),
       );
@@ -555,7 +612,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Builds the swipeable Log, Totals, and Graphs carousel.
+  /// Builds the swipeable Log, Totals, Charts, and Photos carousel.
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -669,6 +726,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                   onPressed: widget.onToggleTheme,
                 ),
+                if (widget.themePaletteMenu != null) widget.themePaletteMenu!,
                 IconButton(
                   tooltip: 'Reports',
                   icon: const Icon(Icons.picture_as_pdf_outlined),
@@ -782,8 +840,8 @@ class _HomePageState extends State<HomePage> {
                           final page = switch (index) {
                             0 => _buildLog(),
                             1 => _buildSummary(),
-                            2 => GraphicsPage(
-                                key: ValueKey('graphs-$_dataGeneration'),
+                            2 => ChartsPage(
+                                key: ValueKey('charts-$_dataGeneration'),
                                 entries: _entries,
                                 distances: _distances,
                               ),
@@ -1110,8 +1168,8 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
               color: Theme.of(context).brightness == Brightness.dark
-                  ? kYellow
-                  : kLightPrimary,
+                  ? Theme.of(context).colorScheme.secondary
+                  : Theme.of(context).colorScheme.primary,
               borderRadius: BorderRadius.circular(15),
             ),
             child: Container(

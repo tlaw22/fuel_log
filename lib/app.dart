@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart'
@@ -16,13 +17,19 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart' hide XFile;
 import 'package:url_launcher/url_launcher.dart';
+import 'widgets/notify_web_stub.dart'
+    if (dart.library.js_interop) 'widgets/notify_web.dart' as browser_notifications;
 
 part 'pages/home_page.dart';
-part 'pages/graphs_page.dart';
+part 'pages/charts_page.dart';
+part 'custom_chart.dart';
 part 'widgets/shared_widgets.dart';
 part 'widgets/entry_form.dart';
+part 'widgets/mute_sound_control.dart';
+part 'widgets/notify.dart';
 part 'pages/pump_photos.dart';
 part 'widgets/about.dart';
+part 'widgets/download_platforms.dart';
 part 'pages/reports.dart';
 part 'styles/stylekit.dart';
 
@@ -65,68 +72,11 @@ class FuelLogApp extends StatefulWidget {
   State<FuelLogApp> createState() => _FuelLogAppState();
 }
 
-class _FuelLogAppState extends State<FuelLogApp> {
-  static const _themePreferenceKey = 'fuel_theme_is_dark_v1';
-  final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
-  bool _isDarkTheme = true;
-  bool _themeWasChanged = false;
-  Future<void> _themeSaveQueue = Future<void>.value();
-
+class _FuelLogAppState extends State<FuelLogApp> with _ThemeSettings {
   @override
   void initState() {
     super.initState();
-    _loadThemePreference();
-  }
-
-  Future<void> _loadThemePreference() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedTheme = prefs.getBool(_themePreferenceKey);
-      if (!mounted || _themeWasChanged || savedTheme == null) return;
-      setState(() => _isDarkTheme = savedTheme);
-    } catch (error, stackTrace) {
-      _reportThemePreferenceError('load', error, stackTrace);
-    }
-  }
-
-  void _toggleTheme() {
-    _themeWasChanged = true;
-    final selectedTheme = !_isDarkTheme;
-    setState(() => _isDarkTheme = selectedTheme);
-    _themeSaveQueue = _themeSaveQueue.then(
-      (_) => _saveThemePreference(selectedTheme),
-    );
-  }
-
-  Future<void> _saveThemePreference(bool isDarkTheme) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (!await prefs.setBool(_themePreferenceKey, isDarkTheme)) {
-        throw StateError('The theme preference was not saved.');
-      }
-    } catch (error, stackTrace) {
-      _reportThemePreferenceError('save', error, stackTrace);
-    }
-  }
-
-  void _reportThemePreferenceError(
-    String action,
-    Object error,
-    StackTrace stackTrace,
-  ) {
-    FlutterError.reportError(
-      FlutterErrorDetails(
-        exception: error,
-        stack: stackTrace,
-        library: 'FuelLog theme preference',
-      ),
-    );
-    _scaffoldMessengerKey.currentState?.showSnackBar(
-      SnackBar(
-        content: Text('Could not $action theme preference: $error'),
-        duration: kAppSnackBarDuration,
-      ),
-    );
+    _loadThemePreferences();
   }
 
   /// Builds the root Material application.
@@ -136,10 +86,15 @@ class _FuelLogAppState extends State<FuelLogApp> {
       title: 'FuelLog',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: _scaffoldMessengerKey,
-      theme: buildTheme(isDark: _isDarkTheme),
+      theme: buildTheme(isDark: _isDarkTheme, palette: _currentPalette),
       home: HomePage(
         isDarkTheme: _isDarkTheme,
         onToggleTheme: _toggleTheme,
+        themePaletteMenu: _ThemePaletteMenu(
+          isDark: _isDarkTheme,
+          selected: _currentPalette,
+          onSelected: _selectPalette,
+        ),
         bluetoothSharePageBuilder: widget.bluetoothSharePageBuilder,
         bluetoothShareEnabled: widget.bluetoothShareEnabled,
       ),

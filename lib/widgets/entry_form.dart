@@ -7,6 +7,10 @@ class EntryForm extends StatefulWidget {
   final FuelEntry? existing;
   final double? lastOdometer;
   final Future<void> Function()? onDelete;
+  final VoidCallback? onNewSavePressed;
+  final bool initialSoundMuted;
+  final ValueChanged<bool>? onSoundMutedChanged;
+  final ValueChanged<String>? onValidatedSavePressed;
 
   /// Creates an add or edit form, optionally with existing entry and delete actions.
   const EntryForm({
@@ -14,6 +18,10 @@ class EntryForm extends StatefulWidget {
     this.existing,
     this.lastOdometer,
     this.onDelete,
+    this.onNewSavePressed,
+    this.initialSoundMuted = false,
+    this.onSoundMutedChanged,
+    this.onValidatedSavePressed,
   });
 
   /// Creates the entry form state.
@@ -29,12 +37,14 @@ class _EntryFormState extends State<EntryForm> {
   late final TextEditingController _price;
   late final TextEditingController _volume;
   late final TextEditingController _odo;
+  late bool _soundMuted;
 
   /// Initializes form controllers and date from a new or existing entry.
   @override
   void initState() {
     super.initState();
     final e = widget.existing;
+    _soundMuted = widget.initialSoundMuted;
     _date = e?.date ?? DateTime.now();
     _price = TextEditingController(text: e != null ? '${e.price}' : '');
     _volume = TextEditingController(text: e != null ? '${e.volume}' : '');
@@ -172,7 +182,11 @@ class _EntryFormState extends State<EntryForm> {
 
   /// Validates the form and returns a created or edited entry to the caller.
   void _submit() {
+    if (widget.existing == null && !_soundMuted) {
+      widget.onNewSavePressed?.call();
+    }
     if (!_formKey.currentState!.validate()) return;
+    widget.onValidatedSavePressed?.call(_volume.text.trim());
     Navigator.pop(
       context,
       FuelEntry(
@@ -203,10 +217,30 @@ class _EntryFormState extends State<EntryForm> {
             children: [
               Row(
                 children: [
+                  if (widget.existing == null) ...[
+                    CircleAvatar(
+                      backgroundColor:
+                          Theme.of(context).colorScheme.primaryContainer,
+                      foregroundColor:
+                          Theme.of(context).colorScheme.onPrimaryContainer,
+                      child: const Icon(Icons.local_gas_station),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
                   Expanded(
                     child: Text(
                       widget.existing == null ? 'New fill-up' : 'Edit fill-up',
-                      style: Theme.of(context).textTheme.titleLarge,
+                      style: widget.existing == null
+                          ? Theme.of(context).textTheme.titleLarge?.copyWith(
+                                color: Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? Theme.of(context)
+                                        .colorScheme
+                                        .onPrimaryContainer
+                                    : kBlue,
+                                fontWeight: FontWeight.bold,
+                              )
+                          : Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
                   if (widget.existing == null && _canTakePumpPhoto)
@@ -281,7 +315,27 @@ class _EntryFormState extends State<EntryForm> {
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
-              FilledButton(onPressed: _submit, child: const Text('Save')),
+              if (widget.existing == null)
+                Row(
+                  children: [
+                    _MuteSoundControl(
+                      muted: _soundMuted,
+                      onChanged: (muted) {
+                        setState(() => _soundMuted = muted);
+                        widget.onSoundMutedChanged?.call(muted);
+                      },
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _submit,
+                        child: const Text('Save'),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                FilledButton(onPressed: _submit, child: const Text('Save')),
             ],
           ),
         ),

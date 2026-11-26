@@ -22,25 +22,27 @@ object TravelNotification {
     private const val previousColor = 0xFF003566.toInt()
 
     data class Data(
-        val currentMonth: String,
-        val previousMonth: String,
-        val currentAmount: String,
-        val previousAmount: String,
-        val currentTotal: Double,
-        val previousTotal: Double,
+        val title: String,
+        val firstLabel: String,
+        val secondLabel: String,
+        val firstAmount: String,
+        val secondAmount: String,
+        val firstTotal: Double?,
+        val secondTotal: Double?,
     ) {
         companion object {
             fun from(call: MethodCall): Data? {
-                val currentMonth = call.argument<String>("currentMonth") ?: return null
-                val previousMonth = call.argument<String>("previousMonth") ?: return null
-                val currentAmount = call.argument<String>("currentAmount") ?: return null
-                val previousAmount = call.argument<String>("previousAmount") ?: return null
-                val currentTotal = call.argument<Double>("currentTotal") ?: return null
-                val previousTotal = call.argument<Double>("previousTotal") ?: return null
-                if (!currentTotal.isFinite() || !previousTotal.isFinite() ||
-                    currentTotal < 0 || previousTotal < 0
+                val title = call.argument<String>("title") ?: return null
+                val firstLabel = call.argument<String>("firstLabel") ?: return null
+                val secondLabel = call.argument<String>("secondLabel") ?: return null
+                val firstAmount = call.argument<String>("firstAmount") ?: return null
+                val secondAmount = call.argument<String>("secondAmount") ?: return null
+                val firstTotal = call.argument<Double>("firstTotal")
+                val secondTotal = call.argument<Double>("secondTotal")
+                if ((firstTotal != null && !firstTotal.isFinite()) ||
+                    (secondTotal != null && !secondTotal.isFinite())
                 ) return null
-                return Data(currentMonth, previousMonth, currentAmount, previousAmount, currentTotal, previousTotal)
+                return Data(title, firstLabel, secondLabel, firstAmount, secondAmount, firstTotal, secondTotal)
             }
         }
     }
@@ -55,7 +57,7 @@ object TravelNotification {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             manager.createNotificationChannel(
                 NotificationChannel(channelId, "Travel expenses", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "Monthly travel comparison after saving a fill-up"
+                    description = "Custom chart comparison after saving a fill-up"
                 },
             )
         }
@@ -76,12 +78,17 @@ object TravelNotification {
             @Suppress("DEPRECATION")
             Notification.Builder(context)
         }
-        val summary = "${data.currentMonth}: ${data.currentAmount}  |  ${data.previousMonth}: ${data.previousAmount}"
+        val summary = "${data.firstLabel}: ${data.firstAmount}  |  ${data.secondLabel}: ${data.secondAmount}"
         val notification = builder
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Monthly travel expenses")
+            .setContentTitle(data.title)
             .setContentText(summary)
-            .setStyle(Notification.BigPictureStyle().bigPicture(picture(data)).setSummaryText(summary))
+            .setStyle(
+                Notification.BigPictureStyle()
+                    .setBigContentTitle(data.title)
+                    .bigPicture(picture(data))
+                    .setSummaryText(summary),
+            )
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
@@ -105,15 +112,18 @@ object TravelNotification {
         }
         paint.color = currentColor
         canvas.drawCircle(30f, 50f, 8f, paint)
-        text(data.currentMonth, 48f, 58f, 27f, Color.BLACK, 290f)
-        text(data.currentAmount, 48f, 92f, 28f, Color.BLACK, 290f)
+        text(data.firstLabel, 48f, 58f, 27f, Color.BLACK, 290f)
+        text(data.firstAmount, 48f, 92f, 28f, Color.BLACK, 290f)
         paint.color = previousColor
         canvas.drawCircle(30f, 146f, 8f, paint)
-        text(data.previousMonth, 48f, 154f, 27f, Color.BLACK, 290f)
-        text(data.previousAmount, 48f, 188f, 28f, Color.BLACK, 290f)
+        text(data.secondLabel, 48f, 154f, 27f, Color.BLACK, 290f)
+        text(data.secondAmount, 48f, 188f, 28f, Color.BLACK, 290f)
 
-        val sum = data.currentTotal + data.previousTotal
-        val share = if (sum == 0.0) 0.0 else data.currentTotal / sum
+        val first = data.firstTotal
+        val second = data.secondTotal
+        val negative = (first != null && first < 0) || (second != null && second < 0)
+        val sum = if (first == null || second == null) 0.0 else first + second
+        val share = if (negative || first == null || second == null || sum == 0.0) 0.0 else first / sum
         val bounds = RectF(372f, 28f, 556f, 212f)
         paint.color = previousColor
         canvas.drawCircle(bounds.centerX(), bounds.centerY(), 92f, paint)
@@ -122,9 +132,11 @@ object TravelNotification {
         paint.color = Color.WHITE
         canvas.drawRoundRect(RectF(393f, 103f, 535f, 137f), 8f, 8f, paint)
         val percent = (share * 100).roundToInt()
-        val label = if (sum == 0.0) "No data" else "$percent% / ${100 - percent}%"
+        val label = if (negative) "Negative amount" else if (sum == 0.0) "No data" else "$percent% / ${100 - percent}%"
         paint.color = Color.BLACK
         paint.textSize = 23f
+        val labelWidth = paint.measureText(label)
+        if (labelWidth > 130f) paint.textSize *= 130f / labelWidth
         paint.textAlign = Paint.Align.CENTER
         canvas.drawText(label, bounds.centerX(), 128f, paint)
         return bitmap

@@ -85,16 +85,15 @@ class _AboutSheetState extends State<AboutSheet> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const SelectableText(
+                SelectableText(
                   _fuelLogProjectUrl,
                   textAlign: TextAlign.center,
+                  style: DefaultTextStyle.of(context)
+                      .style
+                      .apply(fontSizeFactor: 0.5),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'GitHub icon by Font Awesome (CC BY 4.0).',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                const SizedBox(height: 8),
+                const _DownloadPlatforms(),
               ],
             ),
           ),
@@ -115,9 +114,24 @@ class _AboutSheetState extends State<AboutSheet> {
                     ),
                   );
                 }
+                final readme = snapshot.data!;
+                final firstLineEnd = readme.indexOf('\n');
+                final headerEnd =
+                    firstLineEnd == -1 ? readme.length : firstLineEnd;
                 return SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
-                  child: SelectableText(snapshot.data!),
+                  child: SelectableText.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: readme.substring(0, headerEnd),
+                          style: const TextStyle(fontFamily: 'Pacifico'),
+                        ),
+                        TextSpan(text: readme.substring(headerEnd)),
+                      ],
+                    ),
+                    style: const TextStyle(fontSize: 10, fontFamily: 'Oswald'),
+                  ),
                 );
               },
             ),

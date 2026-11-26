@@ -1,12 +1,12 @@
 part of '../app.dart';
 
 /// Shows all-time and current-month spending against an editable monthly budget.
-class GraphicsPage extends StatefulWidget {
+class ChartsPage extends StatefulWidget {
   final List<FuelEntry> entries;
   final Map<String, double> distances;
 
-  /// Creates the graphs page for the supplied fuel entries.
-  const GraphicsPage({
+  /// Creates the charts page for the supplied fuel entries.
+  const ChartsPage({
     super.key,
     required this.entries,
     required this.distances,
@@ -14,12 +14,12 @@ class GraphicsPage extends StatefulWidget {
 
   /// Creates state for loading and editing this month's spending budget.
   @override
-  State<GraphicsPage> createState() => _GraphicsPageState();
+  State<ChartsPage> createState() => _ChartsPageState();
 }
 
 /// Loads the monthly budget and builds spending charts from the current entries.
-class _GraphicsPageState extends State<GraphicsPage>
-    with AutomaticKeepAliveClientMixin<GraphicsPage> {
+class _ChartsPageState extends State<ChartsPage>
+    with AutomaticKeepAliveClientMixin<ChartsPage> {
   final _budgetController = TextEditingController();
   final _incomeController = TextEditingController();
   final _insuranceController = TextEditingController();
@@ -30,6 +30,9 @@ class _GraphicsPageState extends State<GraphicsPage>
   double _carPayment = 0;
   double _previousInsurancePayment = 0;
   double _previousCarPayment = 0;
+  SharedPreferences? _customChartPrefs;
+  _CustomChartSelection? _customSelection;
+  String? _customChartError;
 
   /// Keeps the budget editor alive while navigating between carousel pages.
   @override
@@ -58,31 +61,71 @@ class _GraphicsPageState extends State<GraphicsPage>
 
   /// Loads a saved budget for this month, falling back to the previous month.
   Future<void> _loadMonthlyValues() async {
-    final prefs = await SharedPreferences.getInstance();
-    final now = DateTime.now();
-    final previousMonth = DateTime(now.year, now.month - 1);
-    final currentMonthBudget = prefs.getDouble(_budgetKey(now));
-    final previousMonthBudget = prefs.getDouble(_budgetKey(previousMonth));
-    final budget = currentMonthBudget ?? previousMonthBudget;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now();
+      final previousMonth = DateTime(now.year, now.month - 1);
+      final currentMonthBudget = prefs.getDouble(_budgetKey(now));
+      final previousMonthBudget = prefs.getDouble(_budgetKey(previousMonth));
+      final budget = currentMonthBudget ?? previousMonthBudget;
+      if (!mounted) return;
+      setState(() {
+        _budget = budget;
+        _budgetController.text = budget?.toStringAsFixed(2) ?? '';
+        _grossIncome = prefs.getDouble(_monthlyValueKey('income', now)) ?? 0;
+        _insurancePayment =
+            prefs.getDouble(_monthlyValueKey('insurance', now)) ?? 0;
+        _carPayment =
+            prefs.getDouble(_monthlyValueKey('car_payment', now)) ?? 0;
+        _previousInsurancePayment =
+            prefs.getDouble(_monthlyValueKey('insurance', previousMonth)) ?? 0;
+        _previousCarPayment =
+            prefs.getDouble(_monthlyValueKey('car_payment', previousMonth)) ??
+                0;
+        _incomeController.text =
+            _grossIncome == 0 ? '' : _grossIncome.toStringAsFixed(2);
+        _insuranceController.text =
+            _insurancePayment == 0 ? '' : _insurancePayment.toStringAsFixed(2);
+        _carPaymentController.text =
+            _carPayment == 0 ? '' : _carPayment.toStringAsFixed(2);
+      });
+      final customSelection = await _CustomChartSelection.load(prefs);
+      if (!mounted) return;
+      setState(() {
+        _customChartPrefs = prefs;
+        _customSelection = customSelection;
+        _customChartError = null;
+      });
+    } catch (error, stackTrace) {
+      _reportCustomChartError('load', error, stackTrace);
+      if (mounted) setState(() => _customChartError = error.toString());
+    }
+  }
+
+  void _reportCustomChartError(String action, Object error, StackTrace stack) {
+    FlutterError.reportError(FlutterErrorDetails(
+      exception: error,
+      stack: stack,
+      library: 'FuelLog custom chart',
+    ));
     if (!mounted) return;
-    setState(() {
-      _budget = budget;
-      _budgetController.text = budget?.toStringAsFixed(2) ?? '';
-      _grossIncome = prefs.getDouble(_monthlyValueKey('income', now)) ?? 0;
-      _insurancePayment =
-          prefs.getDouble(_monthlyValueKey('insurance', now)) ?? 0;
-      _carPayment = prefs.getDouble(_monthlyValueKey('car_payment', now)) ?? 0;
-      _previousInsurancePayment =
-          prefs.getDouble(_monthlyValueKey('insurance', previousMonth)) ?? 0;
-      _previousCarPayment =
-          prefs.getDouble(_monthlyValueKey('car_payment', previousMonth)) ?? 0;
-      _incomeController.text =
-          _grossIncome == 0 ? '' : _grossIncome.toStringAsFixed(2);
-      _insuranceController.text =
-          _insurancePayment == 0 ? '' : _insurancePayment.toStringAsFixed(2);
-      _carPaymentController.text =
-          _carPayment == 0 ? '' : _carPayment.toStringAsFixed(2);
-    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Could not $action custom chart settings: $error'),
+      duration: kAppSnackBarDuration,
+    ));
+  }
+
+  void _changeCustomSelection(_CustomChartSelection selection) {
+    setState(() => _customSelection = selection);
+    unawaited(_saveCustomSelection(selection));
+  }
+
+  Future<void> _saveCustomSelection(_CustomChartSelection selection) async {
+    try {
+      await selection.save();
+    } catch (error, stackTrace) {
+      _reportCustomChartError('save', error, stackTrace);
+    }
   }
 
   /// Parses the editable budget amount entered by the user.
@@ -300,8 +343,6 @@ class _GraphicsPageState extends State<GraphicsPage>
   Widget build(BuildContext context) {
     super.build(context);
     final now = DateTime.now();
-    final allTimeSpent =
-        widget.entries.fold<double>(0, (total, entry) => total + entry.total);
     final monthEntries = widget.entries
         .where((entry) =>
             entry.date.year == now.year && entry.date.month == now.month)
@@ -344,13 +385,6 @@ class _GraphicsPageState extends State<GraphicsPage>
           efficiency: monthStats.efficiency,
         ),
         const SizedBox(height: 12),
-        _BudgetPieChart(
-          title: 'All-time spending',
-          spent: allTimeSpent,
-          budget: chartBudget,
-          showBudgetPercentage: false,
-        ),
-        const SizedBox(height: 12),
         _MonthlyTravelComparisonChart(
           title:
               '${_monthFmt.format(now)} vs ${_monthFmt.format(previousMonth)}',
@@ -363,7 +397,25 @@ class _GraphicsPageState extends State<GraphicsPage>
           previousFuel: previousMonthStats.spent,
           previousInsurance: _previousInsurancePayment,
           previousCarPayment: _previousCarPayment,
+          distance: monthStats.distance,
         ),
+        const SizedBox(height: 12),
+        if (_customChartError != null)
+          _CollapsibleChart(
+            title: 'Custom Chart',
+            child: Text('Could not load custom chart: $_customChartError'),
+          )
+        else if (_customChartPrefs == null || _customSelection == null)
+          const _CollapsibleChart(
+            title: 'Custom Chart',
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else
+          _CustomComparisonChart(
+            selection: _customSelection!,
+            values: _CustomChartValues(widget.entries, _customChartPrefs!, now),
+            onChanged: _changeCustomSelection,
+          ),
       ],
     );
   }
@@ -376,7 +428,6 @@ class _BudgetPieChart extends StatelessWidget {
   final double? budget;
   final double? distance;
   final double? efficiency;
-  final bool showBudgetPercentage;
 
   /// Creates a chart for the supplied spending total and budget.
   const _BudgetPieChart({
@@ -385,7 +436,6 @@ class _BudgetPieChart extends StatelessWidget {
     required this.budget,
     this.distance,
     this.efficiency,
-    this.showBudgetPercentage = true,
   });
 
   /// Builds the pie chart, legend, and budget progress details.
@@ -433,13 +483,11 @@ class _BudgetPieChart extends StatelessWidget {
                         style: TextStyle(color: colors.error),
                       ),
                     ),
-                  if (showBudgetPercentage) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      '${(spent / goal * 100).round()}% of ${_money.format(goal)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+                  const SizedBox(height: 4),
+                  Text(
+                    '${(spent / goal * 100).round()}% of ${_money.format(goal)}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
               ),
             ),
@@ -489,6 +537,7 @@ class _MonthlyTravelComparisonChart extends StatelessWidget {
   final double previousFuel;
   final double previousInsurance;
   final double previousCarPayment;
+  final double distance;
 
   const _MonthlyTravelComparisonChart({
     required this.title,
@@ -501,6 +550,7 @@ class _MonthlyTravelComparisonChart extends StatelessWidget {
     required this.previousFuel,
     required this.previousInsurance,
     required this.previousCarPayment,
+    required this.distance,
   });
 
   @override
@@ -533,6 +583,11 @@ class _MonthlyTravelComparisonChart extends StatelessWidget {
             ),
           ),
           const Divider(height: 20),
+          Text(
+            'Total distance traveled this month: '
+            '${_num1.format(distance)} $kDistanceUnit',
+          ),
+          const SizedBox(height: 8),
           _BudgetLegendRow(
             color: colors.primary,
             label: 'Fuel this month',
@@ -579,23 +634,163 @@ class _MonthlyTravelComparisonChart extends StatelessWidget {
   }
 }
 
+class _CustomComparisonChart extends StatelessWidget {
+  final _CustomChartSelection selection;
+  final _CustomChartValues values;
+  final ValueChanged<_CustomChartSelection> onChanged;
+
+  const _CustomComparisonChart({
+    required this.selection,
+    required this.values,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final first = values.amounts[selection.first];
+    final second = values.amounts[selection.second];
+    final negative =
+        (first != null && first < 0) || (second != null && second < 0);
+    final total = (first ?? 0) + (second ?? 0);
+    final progress = negative || first == null || second == null || total == 0
+        ? null
+        : first / total;
+    final colors = Theme.of(context).colorScheme;
+
+    Widget selector(String label, _CustomChartMetric selected,
+        ValueChanged<_CustomChartMetric> onSelected) {
+      final accent = colors.brightness == Brightness.dark
+          ? colors.primary
+          : colors.onSurface;
+      return InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: TextStyle(color: colors.onSurface),
+          filled: true,
+          fillColor: colors.surfaceContainerHighest,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: accent, width: 1.5),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: accent, width: 2),
+          ),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<_CustomChartMetric>(
+            key: ValueKey('custom-chart-$label'),
+            value: selected,
+            isExpanded: true,
+            iconEnabledColor: accent,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: colors.onSurface),
+            menuWidth: math.min(MediaQuery.sizeOf(context).width - 32, 360),
+            items: [
+              for (final metric in _CustomChartMetric.values)
+                DropdownMenuItem(
+                  value: metric,
+                  child: Text(metric.label, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: (value) {
+              if (value != null) onSelected(value);
+            },
+          ),
+        ),
+      );
+    }
+
+    return _CollapsibleChart(
+      title: 'Custom Chart',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'select two values to compare',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: selector('First amount', selection.first, (value) {
+                          onChanged(
+                              _CustomChartSelection(value, selection.second));
+                        }),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child:
+                            selector('Second amount', selection.second, (value) {
+                          onChanged(
+                              _CustomChartSelection(selection.first, value));
+                        }),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _ChartSummary(
+            progress: progress,
+            emptyLabel: negative ? 'Negative amount' : 'No data',
+            semanticsLabel:
+                '${selection.first.label} and ${selection.second.label}',
+            child: Column(
+              children: [
+                _BudgetLegendRow(
+                  color: colors.primary,
+                  label: selection.first.label,
+                  amount: first,
+                ),
+                _BudgetLegendRow(
+                  color: colors.surfaceContainerHighest,
+                  label: selection.second.label,
+                  amount: second,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ChartSummary extends StatelessWidget {
   final double? progress;
   final String semanticsLabel;
+  final String emptyLabel;
   final Widget child;
 
   const _ChartSummary({
     required this.progress,
     required this.semanticsLabel,
     required this.child,
+    this.emptyLabel = 'No data',
   });
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final firstPercent = ((progress ?? 0) * 100).round();
-    final percentageText =
-        progress == null ? 'No data' : '$firstPercent% / ${100 - firstPercent}%';
+    final percentageText = progress == null
+        ? emptyLabel
+        : '$firstPercent% / ${100 - firstPercent}%';
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -606,7 +801,7 @@ class _ChartSummary extends StatelessWidget {
             const SizedBox(width: 12),
             Semantics(
               label: progress == null
-                  ? '$semanticsLabel: no data'
+                  ? '$semanticsLabel: $emptyLabel'
                   : '$semanticsLabel: $firstPercent percent and '
                       '${100 - firstPercent} percent',
               child: ExcludeSemantics(
@@ -720,7 +915,7 @@ class _CollapsibleChartState extends State<_CollapsibleChart> {
 class _BudgetLegendRow extends StatelessWidget {
   final Color color;
   final String label;
-  final double amount;
+  final double? amount;
 
   /// Creates a legend row for a budget segment.
   const _BudgetLegendRow({
@@ -743,7 +938,7 @@ class _BudgetLegendRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(child: Text(label)),
-          Text(_money.format(amount)),
+          Text(amount == null ? 'Not set' : _money.format(amount)),
         ],
       ),
     );

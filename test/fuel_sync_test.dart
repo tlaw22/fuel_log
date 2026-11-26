@@ -48,6 +48,38 @@ void main() {
     expect(lightTheme.colorScheme.primary, const Color(0xFFD5BDAF));
   });
 
+  testWidgets('snackbar text is readable in dark and light themes',
+      (tester) async {
+    for (final isDark in [true, false]) {
+      final theme = buildTheme(isDark: isDark);
+      final messengerKey = GlobalKey<ScaffoldMessengerState>();
+      await tester.pumpWidget(MaterialApp(
+        key: ValueKey(isDark),
+        theme: theme,
+        scaffoldMessengerKey: messengerKey,
+        home: const Scaffold(),
+      ));
+      messengerKey.currentState!.showSnackBar(
+        const SnackBar(content: Text('Snack message')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+
+      final color =
+          DefaultTextStyle.of(tester.element(find.text('Snack message')))
+              .style
+              .color!;
+      final background = theme.snackBarTheme.backgroundColor!;
+      final foregroundLuminance = color.computeLuminance();
+      final backgroundLuminance = background.computeLuminance();
+      final contrast = foregroundLuminance > backgroundLuminance
+          ? (foregroundLuminance + 0.05) / (backgroundLuminance + 0.05)
+          : (backgroundLuminance + 0.05) / (foregroundLuminance + 0.05);
+      expect(contrast, greaterThanOrEqualTo(4.5));
+      if (!isDark) expect(color, Colors.white);
+    }
+  });
+
   test('parses exported CSV entries and quoted fields', () {
     final entries = parseFuelCsv(
       'Date,Odometer (mi),Price per gal,Amount (gal),Total cost,'
@@ -111,6 +143,144 @@ void main() {
     expect(find.byTooltip('Switch to dark theme'), findsOneWidget);
   });
 
+  test('new palettes have readable text and controls', () {
+    double contrast(Color first, Color second) {
+      final a = first.computeLuminance();
+      final b = second.computeLuminance();
+      return a > b ? (a + 0.05) / (b + 0.05) : (b + 0.05) / (a + 0.05);
+    }
+
+    for (final (isDark, palette) in [
+      (true, ThemePalette.forest),
+      (true, ThemePalette.purpleRaindrops),
+      (false, ThemePalette.sage),
+      (false, ThemePalette.rose),
+    ]) {
+      final theme = buildTheme(isDark: isDark, palette: palette);
+      final scheme = theme.colorScheme;
+      final pairs = [
+        (scheme.onSurface, scheme.surface),
+        (scheme.onSurface, scheme.surfaceContainerHighest),
+        (scheme.onPrimary, scheme.primary),
+        (scheme.onPrimaryContainer, scheme.primaryContainer),
+        (theme.appBarTheme.foregroundColor!, theme.appBarTheme.backgroundColor!),
+        (theme.snackBarTheme.contentTextStyle!.color!,
+            theme.snackBarTheme.backgroundColor!),
+      ];
+      for (final (foreground, background) in pairs) {
+        expect(contrast(foreground, background), greaterThanOrEqualTo(4.5),
+            reason: '${palette.name}: $foreground on $background');
+      }
+      final selectorAccent = isDark ? scheme.primary : scheme.onSurface;
+      expect(contrast(selectorAccent, scheme.surfaceContainerHighest),
+          greaterThanOrEqualTo(3), reason: palette.name);
+    }
+  });
+
+  testWidgets('palette menu remembers separate light and dark selections',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(320, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const FuelLogApp());
+    await _pumpStartupToCompletion(tester);
+
+    Future<void> openMenu() async {
+      await tester.tap(find.byTooltip('Choose color palette'));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> selectPalette(String name) async {
+      await tester.tap(find.ancestor(
+        of: find.text(name),
+        matching: find.byType(CheckedPopupMenuItem<ThemePalette>),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    ThemeData currentTheme() =>
+        tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!;
+
+    await openMenu();
+    expect(find.text('Classic'), findsOneWidget);
+    expect(find.text('Forest'), findsOneWidget);
+    expect(find.text('Purple Raindrops'), findsOneWidget);
+    expect(find.text('Sage'), findsNothing);
+    await selectPalette('Forest');
+    expect(currentTheme().scaffoldBackgroundColor,
+        buildTheme(palette: ThemePalette.forest).scaffoldBackgroundColor);
+    await openMenu();
+    await selectPalette('Purple Raindrops');
+    expect(currentTheme().scaffoldBackgroundColor,
+        buildTheme(palette: ThemePalette.purpleRaindrops).scaffoldBackgroundColor);
+
+    await tester.tap(find.byTooltip('Switch to light theme'));
+    await tester.pumpAndSettle();
+    expect(currentTheme().brightness, Brightness.light);
+    await openMenu();
+    expect(find.text('Classic'), findsOneWidget);
+    expect(find.text('Sage'), findsOneWidget);
+    expect(find.text('Rose'), findsOneWidget);
+    expect(find.text('Purple Raindrops'), findsNothing);
+    await selectPalette('Sage');
+    expect(currentTheme().scaffoldBackgroundColor,
+        buildTheme(isDark: false, palette: ThemePalette.sage).scaffoldBackgroundColor);
+    await openMenu();
+    await selectPalette('Rose');
+
+    await tester.tap(find.byTooltip('Switch to dark theme'));
+    await tester.pumpAndSettle();
+    expect(currentTheme().scaffoldBackgroundColor,
+        buildTheme(palette: ThemePalette.purpleRaindrops).scaffoldBackgroundColor);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('fuel_dark_palette_v1'), 'purpleRaindrops');
+    expect(prefs.getString('fuel_light_palette_v1'), 'rose');
+    await tester.pumpWidget(const FuelLogApp(key: ValueKey('palette-relaunch')));
+    await _pumpStartupToCompletion(tester);
+    expect(currentTheme().scaffoldBackgroundColor,
+        buildTheme(palette: ThemePalette.purpleRaindrops).scaffoldBackgroundColor);
+    await tester.tap(find.byTooltip('Switch to light theme'));
+    await tester.pumpAndSettle();
+    expect(currentTheme().scaffoldBackgroundColor,
+        buildTheme(isDark: false, palette: ThemePalette.rose).scaffoldBackgroundColor);
+    await openMenu();
+    final rose = tester.widget<CheckedPopupMenuItem<ThemePalette>>(
+      find.ancestor(
+        of: find.text('Rose'),
+        matching: find.byType(CheckedPopupMenuItem<ThemePalette>),
+      ),
+    );
+    expect(rose.checked, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('invalid palette is reported without losing other theme settings',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'fuel_theme_is_dark_v1': false,
+      'fuel_dark_palette_v1': 'forest',
+      'fuel_light_palette_v1': 'invalid',
+    });
+    final errors = <FlutterErrorDetails>[];
+    final oldHandler = FlutterError.onError;
+    FlutterError.onError = errors.add;
+    addTearDown(() => FlutterError.onError = oldHandler);
+    await tester.pumpWidget(const FuelLogApp());
+    await _pumpStartupToCompletion(tester);
+
+    var theme = tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!;
+    expect(theme.brightness, Brightness.light);
+    expect(theme.scaffoldBackgroundColor,
+        buildTheme(isDark: false).scaffoldBackgroundColor);
+    expect(errors, hasLength(1));
+    expect(errors.single.exception, isA<FormatException>());
+    await tester.tap(find.byTooltip('Switch to dark theme'));
+    await tester.pumpAndSettle();
+    theme = tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!;
+    expect(theme.scaffoldBackgroundColor,
+        buildTheme(palette: ThemePalette.forest).scaffoldBackgroundColor);
+  });
+
   testWidgets('startup shows local-data progress and privacy notice',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -153,7 +323,235 @@ void main() {
     expect(find.byIcon(Icons.photo_camera_outlined), findsNothing);
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
-  testWidgets('saving a fill-up posts the monthly travel comparison on Android',
+  testWidgets('new fill-up Save plays sound and retains form validation',
+      (tester) async {
+    var soundCount = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: EntryForm(onNewSavePressed: () => soundCount++),
+      ),
+    ));
+
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(soundCount, 1);
+    expect(find.text('Enter a number'), findsNWidgets(3));
+    expect(find.byType(EntryForm), findsOneWidget);
+
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Fuel price per gal'), '5');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount purchased'), '10');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Odometer reading'), '100');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(soundCount, 2);
+  });
+
+  testWidgets('notification permission is requested only after valid input',
+      (tester) async {
+    var requests = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: EntryForm(onValidatedSavePressed: (_) => requests++),
+      ),
+    ));
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(requests, 0);
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Fuel price per gal'), '5');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount purchased'), '10');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Odometer reading'), '100');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(requests, 1);
+  });
+
+  testWidgets('mute selector controls the new fill-up save sound',
+      (tester) async {
+    var soundCount = 0;
+    final muteChanges = <bool>[];
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: EntryForm(
+          onNewSavePressed: () => soundCount++,
+          onSoundMutedChanged: muteChanges.add,
+        ),
+      ),
+    ));
+
+    expect(find.text('MUTE'), findsOneWidget);
+    expect(find.byIcon(Icons.local_gas_station), findsOneWidget);
+    await tester.tap(find.text('On'));
+    await tester.pump();
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(soundCount, 0);
+    expect(find.text('Enter a number'), findsNWidgets(3));
+
+    await tester.ensureVisible(find.text('Off'));
+    await tester.tap(find.text('Off'));
+    await tester.pump();
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(soundCount, 1);
+    expect(muteChanges, [true, false]);
+  });
+
+  testWidgets('mute control sits to the left of Save on a narrow screen',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: EntryForm())),
+    );
+    await tester.ensureVisible(find.text('Save'));
+    await tester.pump();
+
+    final mute = tester.getRect(find.byType(SegmentedButton<bool>));
+    final save = tester.getRect(find.widgetWithText(FilledButton, 'Save'));
+    expect(mute.right, lessThan(save.left));
+    expect(mute.center.dy, closeTo(save.center.dy, 1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('mute selection persists across form openings and app reloads',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    Future<void> openForm() async {
+      await tester.tap(find.text('Fill-up'));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> reloadApp(String key) async {
+      await tester.pumpWidget(MaterialApp(
+        key: ValueKey(key),
+        home: const HomePage(),
+      ));
+      await _pumpStartupToCompletion(tester);
+      await openForm();
+    }
+
+    await reloadApp('first');
+    expect(
+        tester
+            .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
+            .selected,
+        {false});
+    await tester.ensureVisible(find.text('On'));
+    await tester.tap(find.text('On'));
+    await tester.pumpAndSettle();
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('fuel_save_sound_muted_v1'), isTrue);
+
+    Navigator.of(tester.element(find.byType(EntryForm))).pop();
+    await tester.pumpAndSettle();
+    await openForm();
+    expect(
+        tester
+            .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
+            .selected,
+        {true});
+
+    await reloadApp('second');
+    expect(
+        tester
+            .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
+            .selected,
+        {true});
+    await tester.ensureVisible(find.text('Off'));
+    await tester.tap(find.text('Off'));
+    await tester.pumpAndSettle();
+    expect(prefs.getBool('fuel_save_sound_muted_v1'), isFalse);
+    await reloadApp('third');
+    expect(
+        tester
+            .widget<SegmentedButton<bool>>(find.byType(SegmentedButton<bool>))
+            .selected,
+        {false});
+  });
+
+  testWidgets('muted new fill-up still saves without starting audio',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'fuel_save_sound_muted_v1': true,
+    });
+    final calls = <MethodCall>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const audioChannel = MethodChannel('xyz.luan/audioplayers');
+    const globalAudioChannel = MethodChannel('xyz.luan/audioplayers.global');
+    Future<dynamic> recordAudioCall(MethodCall call) async {
+      calls.add(call);
+      return null;
+    }
+
+    messenger.setMockMethodCallHandler(audioChannel, recordAudioCall);
+    messenger.setMockMethodCallHandler(globalAudioChannel, recordAudioCall);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(audioChannel, null);
+      messenger.setMockMethodCallHandler(globalAudioChannel, null);
+    });
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.text('Fill-up'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Fuel price per gal'), '5');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount purchased'), '10');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Odometer reading'), '100');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+        jsonDecode(prefs.getString('fuel_entries_v1')!) as List, hasLength(1));
+    expect(calls, isEmpty);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('editing a fill-up does not play the new-fill-up sound',
+      (tester) async {
+    var soundCount = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: EntryForm(
+          existing: _entry(
+            id: 'existing',
+            updatedAt: DateTime(2026, 1, 1),
+            price: 2,
+          ),
+          onNewSavePressed: () => soundCount++,
+        ),
+      ),
+    ));
+    expect(find.text('MUTE'), findsNothing);
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(soundCount, 0);
+  });
+
+  testWidgets('coin-drop sound is bundled', (tester) async {
+    final sound = await rootBundle.load('lib/assets/sounds/coin-drop.wav');
+    expect(sound.lengthInBytes, greaterThan(0));
+  });
+
+  testWidgets('saving a fill-up posts the default custom chart on Android',
       (tester) async {
     final now = DateTime.now();
     final previous = DateTime(now.year, now.month - 1, 15);
@@ -197,12 +595,54 @@ void main() {
     expect(calls, hasLength(1));
     expect(calls.single.method, 'showTravelNotification');
     final args = calls.single.arguments as Map<dynamic, dynamic>;
-    expect(args['currentMonth'], DateFormat.yMMMM().format(now));
-    expect(args['previousMonth'], DateFormat.yMMMM().format(previous));
-    expect(args['currentTotal'], 100.0);
-    expect(args['previousTotal'], 35.0);
-    expect(args['currentAmount'], '\$100.00');
-    expect(args['previousAmount'], '\$35.00');
+    expect(args['title'], 'Fueled up: 10 gal - \$50.00');
+    expect(args['firstLabel'], 'Current month travel expenses');
+    expect(args['secondLabel'], 'Previous month travel expenses');
+    expect(args['firstTotal'], 100.0);
+    expect(args['secondTotal'], 35.0);
+    expect(args['firstAmount'], '\$100.00');
+    expect(args['secondAmount'], '\$35.00');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  testWidgets('notification uses saved custom choices and negative amounts',
+      (tester) async {
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'fuel_save_sound_muted_v1': true,
+      'fuel_custom_chart_selection_v1': ['incomeAfterTravel', 'budget'],
+      'fuel_income_${now.year}_${now.month}': 20.0,
+      'fuel_monthly_budget_${now.year}_${now.month}': 100.0,
+    });
+    final calls = <MethodCall>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(fuelLogNativeChannel, (call) async {
+      calls.add(call);
+      return true;
+    });
+    addTearDown(
+        () => messenger.setMockMethodCallHandler(fuelLogNativeChannel, null));
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.text('Fill-up'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Fuel price per gal'), '5');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount purchased'), '10');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Odometer reading'), '100');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    final args = calls.single.arguments as Map<dynamic, dynamic>;
+    expect(args['firstLabel'], 'Income after travel expenses');
+    expect(args['secondLabel'], 'Monthly spending budget');
+    expect(args['firstTotal'], -30.0);
+    expect(args['secondTotal'], 100.0);
+    expect(args['firstAmount'], '-\$30.00');
+    expect(args['secondAmount'], '\$100.00');
   }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets('denied notification leaves the saved fill-up and reports it',
@@ -233,6 +673,99 @@ void main() {
     expect(
         jsonDecode(prefs.getString('fuel_entries_v1')!) as List, hasLength(1));
   }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  testWidgets('notification cancellation calls Android and propagates errors',
+      (tester) async {
+    final calls = <MethodCall>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(fuelLogNativeChannel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(
+        () => messenger.setMockMethodCallHandler(fuelLogNativeChannel, null));
+
+    await FuelLogNotifications.cancel();
+    expect(calls.single.method, 'cancelTravelNotification');
+    messenger.setMockMethodCallHandler(fuelLogNativeChannel, (call) async {
+      throw PlatformException(code: 'cancel_failed');
+    });
+    await expectLater(FuelLogNotifications.cancel(),
+        throwsA(isA<PlatformException>()));
+  });
+
+  testWidgets('Windows notification uses saved fill-up and chart selection',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'fuel_save_sound_muted_v1': true,
+      'fuel_custom_chart_selection_v1': ['currentFuel', 'allTimeFuel'],
+    });
+    const channel = MethodChannel('io.github.tlaw22.fuellog/windows_notification');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.text('Fill-up'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Fuel price per gal'), '5');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount purchased'), '10,123450');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Odometer reading'), '100');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(calls.single.method, 'show');
+    final args = calls.single.arguments as Map<dynamic, dynamic>;
+    expect(args['title'], 'Fueled up: 10,123450 gal - \$50.62');
+    expect(args['fillUp'], contains('10.1 gal, \$50.62'));
+    expect(args['firstLabel'], 'Fuel this month');
+    expect(args['secondLabel'], 'All-time fuel spending');
+    expect(args['firstAmount'], '\$50.62');
+    final prefs = await SharedPreferences.getInstance();
+    expect(jsonDecode(prefs.getString('fuel_entries_v1')!) as List, hasLength(1));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('Windows notification failure does not prevent saving',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'fuel_save_sound_muted_v1': true});
+    const channel = MethodChannel('io.github.tlaw22.fuellog/windows_notification');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      throw PlatformException(
+          code: 'notification_failed',
+          message: 'Notifications are disabled in Windows notification settings.');
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.text('Fill-up'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Fuel price per gal'), '5');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Amount purchased'), '10');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Odometer reading'), '100');
+    await tester.ensureVisible(find.text('Save'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Fill-up saved, but notification failed:'),
+        findsOneWidget);
+    final prefs = await SharedPreferences.getInstance();
+    expect(jsonDecode(prefs.getString('fuel_entries_v1')!) as List, hasLength(1));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('AppBar menu includes Bluetooth share, reports, CSV, and backups',
       (tester) async {
@@ -345,6 +878,8 @@ void main() {
         {'fileName': 'fuel_log_report_old.txt', 'contents': 'Old report'},
       ]),
       'fuel_theme_is_dark_v1': false,
+      'fuel_dark_palette_v1': 'forest',
+      'fuel_light_palette_v1': 'rose',
     });
 
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
@@ -393,8 +928,41 @@ void main() {
         prefs.getDouble('fuel_car_payment_${now.year}_${now.month}'), isNull);
     expect(prefs.getString('fuel_reports_v1'), isNull);
     expect(prefs.getBool('fuel_theme_is_dark_v1'), isFalse);
+    expect(prefs.getString('fuel_dark_palette_v1'), 'forest');
+    expect(prefs.getString('fuel_light_palette_v1'), 'rose');
     expect(find.text('App data wiped.'), findsOneWidget);
   });
+
+  testWidgets('Windows wipe continues if notification removal fails',
+      (tester) async {
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'fuel_entries_v1':
+          jsonEncode([_entry(id: 'entry', updatedAt: now, price: 5).toJson()]),
+    });
+    const channel = MethodChannel('io.github.tlaw22.fuellog/windows_notification');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'cancel');
+      throw PlatformException(code: 'notification_failed');
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wipe Data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wipe data'));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('fuel_entries_v1'), isNull);
+    expect(
+        find.textContaining('App data wiped, but notification could not be removed:'),
+        findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('About menu displays the bundled README', (tester) async {
     SharedPreferences.setMockInitialValues({});
@@ -409,6 +977,13 @@ void main() {
     expect(find.text('About Fuel Log'), findsOneWidget);
     expect(find.text('View project on GitHub'), findsOneWidget);
     expect(find.text('https://github.com/tlaw22/fuel_log'), findsOneWidget);
+    final projectUrl = find.text('https://github.com/tlaw22/fuel_log');
+    final selectableUrl =
+        find.ancestor(of: projectUrl, matching: find.byType(SelectableText));
+    final urlText = tester.widget<SelectableText>(selectableUrl);
+    final defaultSize =
+        DefaultTextStyle.of(tester.element(selectableUrl)).style.fontSize;
+    expect(urlText.style?.fontSize, defaultSize! / 2);
     expect(
       find.byWidgetPredicate(
         (widget) =>
@@ -417,8 +992,71 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.textContaining('A Flutter app for tracking fuel fill-ups'),
-        findsOneWidget);
+    final readme =
+        find.textContaining('A Flutter app for tracking fuel fill-ups');
+    expect(readme, findsOneWidget);
+    final selectableReadme =
+        find.ancestor(of: readme, matching: find.byType(SelectableText));
+    final readmeText = tester.widget<SelectableText>(selectableReadme);
+    expect(readmeText.style?.fontSize, 10);
+    expect(readmeText.style?.fontFamily, 'Oswald');
+    final spans = readmeText.textSpan!.children!;
+    final heading = spans.first as TextSpan;
+    final body = spans.last as TextSpan;
+    expect(heading.text!.trimRight(), '# Fuel Log');
+    expect(heading.style?.fontFamily, 'Pacifico');
+    expect(body.text!.replaceAll('\r\n', '\n'),
+        startsWith('\n\nA Flutter app for tracking fuel fill-ups'));
+    expect(body.style?.fontFamily, isNull);
+    expect('${heading.text}${body.text}', await rootBundle.loadString('README.md'));
+  });
+
+  testWidgets('About page download button opens the releases page',
+      (tester) async {
+    const channel = MethodChannel('plugins.flutter.io/url_launcher');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    MethodCall? launch;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      launch = call;
+      return true;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.binding.setSurfaceSize(const Size(320, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: AboutSheet())),
+    );
+    await tester.pump();
+
+    final button = find.text('Download Other Platroms');
+    expect(button, findsOneWidget);
+    for (final name in ['Windows', 'Firefox', 'Android']) {
+      final avatar = find.byTooltip(name);
+      expect(avatar, findsOneWidget);
+      expect(
+          tester.getTopLeft(avatar).dx, lessThan(tester.getTopLeft(button).dx));
+    }
+    for (final icon in [
+      FontAwesomeIcons.windows,
+      FontAwesomeIcons.firefox,
+      FontAwesomeIcons.android,
+    ]) {
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is FaIcon && widget.icon?.codePoint == icon.codePoint,
+        ),
+        findsOneWidget,
+      );
+    }
+    await tester.tap(button);
+    await tester.pump();
+    expect(launch?.method, 'launch');
+    expect(
+        launch?.arguments['url'], 'https://github.com/tlaw22/fuel_log/releases');
+    expect(launch?.arguments['useWebView'], false);
+    expect(tester.takeException(), isNull);
   });
 
   test('loads legacy entries without an edit timestamp', () {
@@ -508,7 +1146,7 @@ void main() {
     );
   });
 
-  testWidgets('graphs carry forward the previous month budget', (tester) async {
+  testWidgets('charts carry forward the previous month budget', (tester) async {
     tester.view.physicalSize = const Size(900, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -522,7 +1160,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: GraphicsPage(
+          body: ChartsPage(
             distances: const {'current-month': 150},
             entries: [
               _entry(
@@ -557,9 +1195,9 @@ void main() {
     expect(find.text('15.0 mi/gal'), findsOneWidget);
   });
 
-  testWidgets('graph summaries show their pie percentages beside the figures',
+  testWidgets('chart summaries show their pie percentages beside the figures',
       (tester) async {
-    tester.view.physicalSize = const Size(320, 1800);
+    tester.view.physicalSize = const Size(320, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -572,7 +1210,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: GraphicsPage(
+          body: ChartsPage(
             distances: const {},
             entries: [
               _entry(id: 'current', updatedAt: now, price: 5, date: now),
@@ -590,16 +1228,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('20% / 80%'), findsOneWidget);
-    expect(find.text('28% / 72%'), findsOneWidget);
-    expect(find.text('71% / 29%'), findsOneWidget);
+    expect(find.text('28% / 72%'), findsNothing);
+    expect(find.text('71% / 29%'), findsNWidgets(2));
     expect(tester.getTopLeft(find.text('Spent').first).dx,
         lessThan(tester.getTopLeft(find.text('20% / 80%')).dx));
-    expect(tester.getTopLeft(find.text('Current month travel expenses')).dx,
-        lessThan(tester.getTopLeft(find.text('71% / 29%')).dx));
+    expect(
+        tester.getTopLeft(find.text('Current month travel expenses').first).dx,
+        lessThan(tester.getTopLeft(find.text('71% / 29%').first).dx));
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('graph pies handle overspending and empty comparisons',
+  testWidgets('chart pies handle overspending and empty comparisons',
       (tester) async {
     tester.view.physicalSize = const Size(320, 1800);
     tester.view.devicePixelRatio = 1;
@@ -612,7 +1251,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: GraphicsPage(
+          body: ChartsPage(
             distances: const {},
             entries: [
               _entry(id: 'old', updatedAt: now, price: 5, date: DateTime(2020)),
@@ -624,13 +1263,234 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('0% / 100%'), findsOneWidget);
-    expect(find.text('100% / 0%'), findsOneWidget);
-    expect(find.text('Over budget by \$25.00'), findsOneWidget);
-    expect(find.text('No data'), findsOneWidget);
+    expect(find.text('100% / 0%'), findsNothing);
+    expect(find.text('Over budget by \$25.00'), findsNothing);
+    expect(find.text('No data'), findsNWidgets(2));
+    expect(find.text('Total distance traveled this month: 0.0 mi'),
+        findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('home graphs page shows monthly miles and fuel efficiency',
+  testWidgets('middle chart totals only the current month distance',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ChartsPage(
+          entries: [
+            _entry(id: 'first', updatedAt: now, price: 2, date: now),
+            _entry(id: 'second', updatedAt: now, price: 3, date: now),
+            _entry(
+              id: 'previous',
+              updatedAt: now,
+              price: 1,
+              date: DateTime(now.year, now.month - 1, 15),
+            ),
+          ],
+          distances: const {'first': 125.5, 'second': 40, 'previous': 900},
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final title = find.text(
+        '${DateFormat.yMMMM().format(now)} vs ${DateFormat.yMMMM().format(DateTime(now.year, now.month - 1))}');
+    final chart = find.ancestor(of: title, matching: find.byType(Card));
+    expect(
+      find.descendant(
+        of: chart,
+        matching: find.text('Total distance traveled this month: 165.5 mi'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('custom chart selectors share a card and fit side by side',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: ChartsPage(entries: [], distances: {})),
+    ));
+    await tester.pumpAndSettle();
+
+    final first = find.byKey(const ValueKey('custom-chart-First amount'));
+    final second = find.byKey(const ValueKey('custom-chart-Second amount'));
+    final card = find.ancestor(of: first, matching: find.byType(Card)).first;
+    expect(find.descendant(of: card, matching: second), findsOneWidget);
+    expect(
+      find.descendant(
+        of: card,
+        matching: find.text('select two values to compare'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.getTopLeft(first).dy, tester.getTopLeft(second).dy);
+    expect(tester.getTopLeft(first).dx, lessThan(tester.getTopLeft(second).dx));
+    await tester.tap(first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fuel this month').last);
+    await tester.pumpAndSettle();
+    await tester.tap(second);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Previous month fuel').last);
+    await tester.pumpAndSettle();
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList('fuel_custom_chart_selection_v1'),
+        ['currentFuel', 'previousFuel']);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('custom chart selectors stand out in both themes',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    double contrast(Color first, Color second) {
+      final a = first.computeLuminance();
+      final b = second.computeLuminance();
+      return a > b ? (a + 0.05) / (b + 0.05) : (b + 0.05) / (a + 0.05);
+    }
+
+    for (final isDark in [true, false]) {
+      SharedPreferences.setMockInitialValues({});
+      await tester.pumpWidget(MaterialApp(
+        key: ValueKey(isDark),
+        theme: buildTheme(isDark: isDark),
+        home: const Scaffold(body: ChartsPage(entries: [], distances: {})),
+      ));
+      await tester.pumpAndSettle();
+      for (final label in ['First amount', 'Second amount']) {
+        final selector = find.byKey(ValueKey('custom-chart-$label'));
+        final decorator = tester.widget<InputDecorator>(
+          find.ancestor(of: selector, matching: find.byType(InputDecorator)).first,
+        );
+        final decoration = decorator.decoration;
+        final fill = decoration.fillColor!;
+        final border = decoration.enabledBorder! as OutlineInputBorder;
+        final dropdown = tester.widget<DropdownButton<dynamic>>(selector);
+        expect(decoration.filled, isTrue);
+        expect(contrast(border.borderSide.color, fill), greaterThanOrEqualTo(3));
+        expect(contrast(dropdown.style!.color!, fill), greaterThanOrEqualTo(4.5));
+        expect(contrast(dropdown.iconEnabledColor!, fill), greaterThanOrEqualTo(3));
+      }
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('custom chart selections update labels, percentages and persist',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'fuel_insurance_${now.year}_${now.month}': 30.0,
+    });
+    final entry = _entry(id: 'current', updatedAt: now, price: 5, date: now);
+    Future<void> loadChart(String key) async {
+      await tester.pumpWidget(MaterialApp(
+        key: ValueKey(key),
+        home: Scaffold(
+          body: ChartsPage(entries: [entry], distances: const {}),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    await loadChart('first');
+    final customTitle = find.text('Custom Chart');
+    final monthTitle = find.text(
+        '${DateFormat.yMMMM().format(now)} vs ${DateFormat.yMMMM().format(DateTime(now.year, now.month - 1))}');
+    expect(tester.getTopLeft(customTitle).dy,
+        greaterThan(tester.getTopLeft(monthTitle).dy));
+    expect(find.text('All-time spending'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('custom-chart-First amount')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fuel this month').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('custom-chart-Second amount')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Insurance payment').last);
+    await tester.pumpAndSettle();
+    expect(find.text('63% / 37%'), findsOneWidget);
+    final card = find.ancestor(of: customTitle, matching: find.byType(Card));
+    expect(find.descendant(of: card, matching: find.text('Fuel this month')),
+        findsNWidgets(2));
+    expect(find.descendant(of: card, matching: find.text('Insurance payment')),
+        findsNWidgets(2));
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getStringList('fuel_custom_chart_selection_v1'),
+        ['currentFuel', 'currentInsurance']);
+
+    await loadChart('second');
+    expect(find.text('63% / 37%'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.ancestor(
+                of: find.text('Custom Chart'), matching: find.byType(Card)),
+            matching: find.text('Fuel this month')),
+        findsNWidgets(2));
+  });
+
+  testWidgets('custom chart reports a negative amount instead of a percentage',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'fuel_custom_chart_selection_v1': ['incomeAfterTravel', 'currentFuel'],
+      'fuel_income_${now.year}_${now.month}': 20.0,
+    });
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ChartsPage(
+          entries: [_entry(id: 'current', updatedAt: now, price: 5, date: now)],
+          distances: const {},
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Negative amount'), findsOneWidget);
+    expect(find.text('-\$30.00'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('custom chart distinguishes an unset budget from zero',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({
+      'fuel_custom_chart_selection_v1': ['budget', 'currentFuel'],
+    });
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: ChartsPage(entries: [], distances: {})),
+    ));
+    await tester.pumpAndSettle();
+    final card = find.ancestor(
+        of: find.text('Custom Chart'), matching: find.byType(Card));
+    expect(find.descendant(of: card, matching: find.text('Not set')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('No data')),
+        findsOneWidget);
+  });
+
+  testWidgets('home charts page shows monthly miles and fuel efficiency',
       (tester) async {
     final now = DateTime.now();
     final previousMonth = DateTime(now.year, now.month - 1, 15);
@@ -677,7 +1537,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: GraphicsPage(
+          body: ChartsPage(
             distances: const {},
             entries: [
               _entry(
@@ -732,7 +1592,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: GraphicsPage(
+          body: ChartsPage(
             distances: const {},
             entries: [
               _entry(
@@ -793,18 +1653,22 @@ void main() {
       prefs.getDouble('fuel_car_payment_${now.year}_${now.month}'),
       300,
     );
-    expect(find.text('Previous month travel expenses'), findsOneWidget);
-    expect(find.text('Previous month insurance'), findsOneWidget);
-    expect(find.text('\$0.00'), findsWidgets);
-
     final chartTitle =
         '${DateFormat.yMMMM().format(now)} vs ${DateFormat.yMMMM().format(previousMonth)}';
+    final card = find.ancestor(
+        of: find.text(chartTitle), matching: find.byType(Card));
+    Finder inTravelChart(String text) =>
+        find.descendant(of: card, matching: find.text(text));
+    expect(inTravelChart('Previous month travel expenses'), findsOneWidget);
+    expect(inTravelChart('Previous month insurance'), findsOneWidget);
+    expect(find.text('\$0.00'), findsWidgets);
+
     await tester.tap(find.text(chartTitle));
     await tester.pumpAndSettle();
-    expect(find.text('Current month travel expenses'), findsNothing);
+    expect(inTravelChart('Current month travel expenses'), findsNothing);
     await tester.tap(find.text(chartTitle));
     await tester.pumpAndSettle();
-    expect(find.text('Current month travel expenses'), findsOneWidget);
+    expect(inTravelChart('Current month travel expenses'), findsOneWidget);
   });
 
   testWidgets('Bluetooth sharing entry point is optional per build variant',
@@ -1086,6 +1950,19 @@ void main() {
     expect(find.byIcon(Icons.bar_chart), findsOneWidget);
     expect(find.byIcon(Icons.pie_chart_outline), findsOneWidget);
     expect(find.byIcon(Icons.photo_library_outlined), findsOneWidget);
+    final chartsNavigation = find.byWidgetPredicate(
+      (widget) => widget is Semantics && widget.properties.label == 'Charts page',
+    );
+    expect(chartsNavigation, findsOneWidget);
+    expect(
+      find.descendant(
+          of: chartsNavigation, matching: find.byIcon(Icons.pie_chart_outline)),
+      findsOneWidget,
+    );
+    expect(find.text('Graphs'), findsNothing);
+    await tester.tap(find.text('Charts'));
+    await tester.pumpAndSettle();
+    expect(find.text('Log my budget data'), findsOneWidget);
     await tester.tap(find.text('Totals'));
     await tester.pumpAndSettle();
     expect(find.text('Totals'), findsOneWidget);
@@ -1097,7 +1974,7 @@ void main() {
       const Offset(-500, 0),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Graphs'), findsOneWidget);
+    expect(find.text('Charts'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Previous page'));
     await tester.pumpAndSettle();
@@ -1105,7 +1982,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Next page'));
     await tester.pumpAndSettle();
-    expect(find.text('Graphs'), findsOneWidget);
+    expect(find.text('Charts'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Previous page'));
     await tester.pumpAndSettle();
@@ -1113,7 +1990,7 @@ void main() {
 
     await tester.tap(find.byTooltip('Next page'));
     await tester.pumpAndSettle();
-    expect(find.text('Graphs'), findsOneWidget);
+    expect(find.text('Charts'), findsOneWidget);
   });
 
   testWidgets('Linux Photos page offers access to the Pictures folder',
@@ -1149,6 +2026,40 @@ void main() {
     expect(find.byTooltip('Refresh photos'), findsOneWidget);
     expect(find.text('Android Only Feature'), findsNothing);
   }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  testWidgets('Photos page offers downloads and reports launch failures',
+      (tester) async {
+    const channel = MethodChannel('plugins.flutter.io/url_launcher');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    MethodCall? launch;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      launch = call;
+      return false;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.binding.setSurfaceSize(const Size(400, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      const MaterialApp(home: Scaffold(body: PumpPhotosPage())),
+    );
+    await tester.pump();
+
+    expect(find.byTooltip('Windows'), findsOneWidget);
+    expect(find.byTooltip('Firefox'), findsOneWidget);
+    expect(find.byTooltip('Android'), findsOneWidget);
+    await tester.tap(find.text('Download Other Platroms'));
+    await tester.pump();
+    expect(
+        launch?.arguments['url'], 'https://github.com/tlaw22/fuel_log/releases');
+    expect(
+        find.textContaining('Could not open the releases page:'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  }, variant: const TargetPlatformVariant({
+    TargetPlatform.android,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  }));
 
   testWidgets('log entries have a rounded yellow outline', (tester) async {
     final entry = _entry(
