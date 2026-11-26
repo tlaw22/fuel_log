@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:animated_background/animated_background.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 import 'package:file_selector/file_selector.dart';
@@ -21,10 +22,12 @@ import 'widgets/notify_web_stub.dart'
     if (dart.library.js_interop) 'widgets/notify_web.dart' as browser_notifications;
 
 part 'pages/home_page.dart';
+part 'pages/settings_page.dart';
 part 'pages/lunch_page.dart';
 part 'pages/charts_page.dart';
 part 'custom_chart.dart';
 part 'widgets/shared_widgets.dart';
+part 'widgets/app_background.dart';
 part 'widgets/page_shimmer.dart';
 part 'widgets/entry_form.dart';
 part 'widgets/lunch_entry_form.dart';
@@ -91,9 +94,33 @@ class _FuelLogAppState extends State<FuelLogApp> with _ThemeSettings {
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: _scaffoldMessengerKey,
       theme: buildTheme(isDark: _isDarkTheme, palette: _currentPalette),
+      builder: (context, child) {
+        final media = MediaQuery.of(context);
+        return MediaQuery(
+          data: media.copyWith(
+            textScaler: _fontSizePercent == 100
+                ? media.textScaler
+                : _AppTextScaler(media.textScaler, _fontSizePercent / 100),
+          ),
+          child: _AppBackground(
+            bubblesEnabled: _bubblesEnabled,
+            child: child!,
+          ),
+        );
+      },
       home: HomePage(
         isDarkTheme: _isDarkTheme,
         onToggleTheme: _toggleTheme,
+        settingsPageBuilder: (context) => _SettingsPage(
+          isDarkTheme: () => _isDarkTheme,
+          selectedPalette: () => _currentPalette,
+          fontSizePercent: () => _fontSizePercent,
+          bubblesEnabled: () => _bubblesEnabled,
+          onToggleTheme: _toggleTheme,
+          onSelectPalette: _selectPalette,
+          onSetFontSize: _setFontSize,
+          onSetBubblesEnabled: _setBubblesEnabled,
+        ),
         themePaletteMenu: _ThemePaletteMenu(
           isDark: _isDarkTheme,
           selected: _currentPalette,

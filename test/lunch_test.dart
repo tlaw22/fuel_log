@@ -7,6 +7,16 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized()
+        .platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+  });
+  tearDown(() {
+    TestWidgetsFlutterBinding.ensureInitialized()
+        .platformDispatcher.clearAccessibilityFeaturesTestValue();
+  });
+
   Future<void> openLunch(WidgetTester tester) async {
     await tester
         .pumpWidget(const MaterialApp(home: Scaffold(body: LunchPage())));
@@ -41,8 +51,7 @@ void main() {
     expect(help, findsOneWidget);
     expect(tester.getSize(help), const Size(12, 12));
     final button = find.ancestor(of: help, matching: find.byType(IconButton));
-    expect(tester.getSize(button).width, greaterThanOrEqualTo(48));
-    expect(tester.getSize(button).height, greaterThanOrEqualTo(48));
+    expect(tester.getSize(button), const Size(24, 24));
     expect(tester.getTopLeft(help).dx,
         greaterThan(tester.getTopRight(heading).dx));
     await tester.tap(help);
@@ -186,6 +195,26 @@ void main() {
     expect(find.text('Add lunch'), findsOneWidget);
     expect(find.text('Fill-up'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Lunch remains usable with larger app text', (tester) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    tester.binding.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.binding.platformDispatcher.clearTextScaleFactorTestValue);
+    SharedPreferences.setMockInitialValues({'fuel_font_size_percent_v1': 120});
+    await tester.pumpWidget(const FuelLogApp());
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byWidgetPredicate(
+      (widget) =>
+          widget is Semantics && widget.properties.label == 'Lunch page',
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Lunch budget'), findsOneWidget);
+    expect(find.text('Add lunch'), findsOneWidget);
   });
 
   testWidgets('the lunch sheet saves the selected date and time',

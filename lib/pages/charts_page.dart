@@ -1069,8 +1069,16 @@ class _BudgetLegendRow extends StatelessWidget {
             decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 8),
-          Expanded(child: Text(label)),
-          Text(amount == null ? 'Not set' : _money.format(amount)),
+          Expanded(
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              spacing: 8,
+              children: [
+                Text(label),
+                Text(amount == null ? 'Not set' : _money.format(amount)),
+              ],
+            ),
+          ),
         ],
       ),
     );

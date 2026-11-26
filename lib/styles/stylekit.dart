@@ -230,18 +230,20 @@ class _ThemePaletteMenu extends StatelessWidget {
   final bool isDark;
   final ThemePalette selected;
   final ValueChanged<ThemePalette> onSelected;
+  final Widget? child;
 
   const _ThemePaletteMenu({
     required this.isDark,
     required this.selected,
     required this.onSelected,
+    this.child,
   });
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<ThemePalette>(
       tooltip: 'Choose color palette',
-      icon: const Icon(Icons.palette_outlined),
+      icon: child == null ? const Icon(Icons.palette_outlined) : null,
       initialValue: selected,
       onSelected: onSelected,
       itemBuilder: (context) => [
@@ -269,6 +271,7 @@ class _ThemePaletteMenu extends StatelessWidget {
             ),
           ),
       ],
+      child: child,
     );
   }
 }
@@ -311,18 +314,46 @@ class _OutlinedPopupMenuEntryState<T>
   }
 }
 
+class _AppTextScaler extends TextScaler {
+  final TextScaler systemScaler;
+  final double factor;
+
+  const _AppTextScaler(this.systemScaler, this.factor);
+
+  @override
+  double scale(double fontSize) => systemScaler.scale(fontSize) * factor;
+
+  @override
+  double get textScaleFactor => scale(14) / 14;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _AppTextScaler &&
+      other.systemScaler == systemScaler &&
+      other.factor == factor;
+
+  @override
+  int get hashCode => Object.hash(systemScaler, factor);
+}
+
 mixin _ThemeSettings on State<FuelLogApp> {
   static const _themePreferenceKey = 'fuel_theme_is_dark_v1';
   static const _darkPaletteKey = 'fuel_dark_palette_v1';
   static const _lightPaletteKey = 'fuel_light_palette_v1';
+  static const _fontSizeKey = 'fuel_font_size_percent_v1';
+  static const _bubblesKey = 'fuel_bubbles_enabled_v1';
 
   final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   bool _isDarkTheme = true;
   ThemePalette _darkPalette = ThemePalette.classic;
   ThemePalette _lightPalette = ThemePalette.classic;
+  int _fontSizePercent = 100;
+  bool _bubblesEnabled = true;
   bool _themeWasChanged = false;
   bool _darkPaletteWasChanged = false;
   bool _lightPaletteWasChanged = false;
+  bool _fontSizeWasChanged = false;
+  bool _bubblesWasChanged = false;
   Future<void> _themeSaveQueue = Future<void>.value();
 
   ThemePalette get _currentPalette =>
@@ -343,17 +374,45 @@ mixin _ThemeSettings on State<FuelLogApp> {
     }
   }
 
+  int _readFontSize(SharedPreferences prefs) {
+    try {
+      final value = prefs.getInt(_fontSizeKey) ?? 100;
+      if (value < 60 || value > 120 || (value - 60) % 20 != 0) {
+        throw FormatException('Unknown saved font size: $value');
+      }
+      return value;
+    } catch (error, stackTrace) {
+      _reportThemePreferenceError('load', error, stackTrace,
+          preference: 'font size');
+      return 100;
+    }
+  }
+
+  bool _readBubblesEnabled(SharedPreferences prefs) {
+    try {
+      return prefs.getBool(_bubblesKey) ?? true;
+    } catch (error, stackTrace) {
+      _reportThemePreferenceError('load', error, stackTrace,
+          preference: 'bubbles');
+      return true;
+    }
+  }
+
   Future<void> _loadThemePreferences() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedTheme = prefs.getBool(_themePreferenceKey);
       final darkPalette = _readPalette(prefs, true);
       final lightPalette = _readPalette(prefs, false);
+      final fontSize = _readFontSize(prefs);
+      final bubblesEnabled = _readBubblesEnabled(prefs);
       if (!mounted) return;
       setState(() {
         if (!_themeWasChanged && savedTheme != null) _isDarkTheme = savedTheme;
         if (!_darkPaletteWasChanged) _darkPalette = darkPalette;
         if (!_lightPaletteWasChanged) _lightPalette = lightPalette;
+        if (!_fontSizeWasChanged) _fontSizePercent = fontSize;
+        if (!_bubblesWasChanged) _bubblesEnabled = bubblesEnabled;
       });
     } catch (error, stackTrace) {
       _reportThemePreferenceError('load', error, stackTrace);
@@ -389,15 +448,36 @@ mixin _ThemeSettings on State<FuelLogApp> {
     );
   }
 
-  void _saveThemeSetting(Future<bool> Function(SharedPreferences) write) {
+  void _setFontSize(int percent) {
+    if (percent < 60 || percent > 120 || (percent - 60) % 20 != 0) {
+      throw ArgumentError.value(percent, 'percent', 'Invalid font size');
+    }
+    _fontSizeWasChanged = true;
+    setState(() => _fontSizePercent = percent);
+    _saveThemeSetting((prefs) => prefs.setInt(_fontSizeKey, percent),
+        preference: 'font size');
+  }
+
+  void _setBubblesEnabled(bool enabled) {
+    _bubblesWasChanged = true;
+    setState(() => _bubblesEnabled = enabled);
+    _saveThemeSetting((prefs) => prefs.setBool(_bubblesKey, enabled),
+        preference: 'bubbles');
+  }
+
+  void _saveThemeSetting(
+    Future<bool> Function(SharedPreferences) write, {
+    String preference = 'theme',
+  }) {
     _themeSaveQueue = _themeSaveQueue.then((_) async {
       try {
         final prefs = await SharedPreferences.getInstance();
         if (!await write(prefs)) {
-          throw StateError('The theme preference was not saved.');
+          throw StateError('The $preference preference was not saved.');
         }
       } catch (error, stackTrace) {
-        _reportThemePreferenceError('save', error, stackTrace);
+        _reportThemePreferenceError('save', error, stackTrace,
+            preference: preference);
       }
     });
   }
@@ -405,18 +485,19 @@ mixin _ThemeSettings on State<FuelLogApp> {
   void _reportThemePreferenceError(
     String action,
     Object error,
-    StackTrace stackTrace,
-  ) {
+    StackTrace stackTrace, {
+    String preference = 'theme',
+  }) {
     FlutterError.reportError(
       FlutterErrorDetails(
         exception: error,
         stack: stackTrace,
-        library: 'FuelLog theme preference',
+        library: 'FuelLog $preference preference',
       ),
     );
     _scaffoldMessengerKey.currentState?.showSnackBar(
       SnackBar(
-        content: Text('Could not $action theme preference: $error'),
+        content: Text('Could not $action $preference preference: $error'),
         duration: kAppSnackBarDuration,
       ),
     );

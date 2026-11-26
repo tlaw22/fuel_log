@@ -43,6 +43,41 @@
       text-align: center;
       padding: 24px;
     }
+    #install-prompt {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: max(12px, env(safe-area-inset-bottom));
+      z-index: 2147483646;
+      max-width: 440px;
+      max-height: calc(100vh - 24px);
+      max-height: calc(100dvh - 24px);
+      box-sizing: border-box;
+      overflow-y: auto;
+      margin: auto;
+      padding: 16px;
+      border: 1px solid #003566;
+      border-radius: 12px;
+      background: #fff;
+      color: #1b2633;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      font: 15px/1.4 sans-serif;
+    }
+    #install-prompt[hidden] { display: none; }
+    #install-prompt h2 { margin: 0 0 8px; font-size: 18px; }
+    #install-prompt p { margin: 0 0 12px; }
+    #install-prompt button {
+      min-height: 44px;
+      padding: 8px 14px;
+      border: 1px solid #003566;
+      border-radius: 8px;
+      background: #fff;
+      color: #003566;
+      font: inherit;
+      cursor: pointer;
+    }
+    #install-prompt #install-action { background: #003566; color: #fff; }
+    #install-prompt button + button { margin-left: 8px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) {
       #startup-spinner { animation: none; }
@@ -62,6 +97,7 @@
     window.addEventListener('unhandledrejection', showStartupError);
   </script>
   <script src="fuel_notifications.js" defer></script>
+  <script src="install_prompt.js" defer></script>
   <script src="flutter_bootstrap.js" defer onerror="showStartupError()"></script>
 </head>
 <body>
@@ -72,5 +108,12 @@
       <button onclick="window.location.reload()">Retry</button>
     </div>
   </div>
+  <section id="install-prompt" aria-labelledby="install-title" aria-live="polite" hidden>
+    <h2 id="install-title">Install FuelLog on your phone</h2>
+    <p>Keep FuelLog handy on your home screen. Existing saved data may not carry over to the installed app.</p>
+    <p id="install-instructions" role="status" hidden></p>
+    <button id="install-action" type="button">How to install</button>
+    <button id="install-dismiss" type="button">Not now</button>
+  </section>
 </body>
 </html>

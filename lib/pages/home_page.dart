@@ -124,6 +124,7 @@ class HomePage extends StatefulWidget {
   final bool isDarkTheme;
   final VoidCallback? onToggleTheme;
   final Widget? themePaletteMenu;
+  final WidgetBuilder? settingsPageBuilder;
   final BluetoothSharePageBuilder? bluetoothSharePageBuilder;
   final bool bluetoothShareEnabled;
 
@@ -133,6 +134,7 @@ class HomePage extends StatefulWidget {
     this.isDarkTheme = true,
     this.onToggleTheme,
     this.themePaletteMenu,
+    this.settingsPageBuilder,
     this.bluetoothSharePageBuilder,
     this.bluetoothShareEnabled = true,
   });
@@ -211,6 +213,7 @@ class _HomePageState extends State<HomePage> {
   AudioPlayer? _saveSoundPlayer;
   bool _soundMuted = false;
   Future<void> _soundMuteSaveQueue = Future<void>.value();
+  Timer? _monthChangeTimer;
 
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -223,13 +226,25 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _load();
+    _scheduleMonthChange();
   }
 
   @override
   void dispose() {
+    _monthChangeTimer?.cancel();
     final player = _saveSoundPlayer;
     if (player != null) unawaited(_disposeSaveSound(player));
     super.dispose();
+  }
+
+  void _scheduleMonthChange() {
+    final now = DateTime.now();
+    final nextMonth = DateTime(now.year, now.month + 1);
+    _monthChangeTimer = Timer(nextMonth.difference(now), () {
+      if (!mounted) return;
+      setState(() {});
+      _scheduleMonthChange();
+    });
   }
 
   Future<void> _disposeSaveSound(AudioPlayer player) async {
@@ -685,108 +700,176 @@ class _HomePageState extends State<HomePage> {
   /// Builds the swipeable app sections.
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final selectedPageColor = colorScheme.brightness == Brightness.dark
         ? colorScheme.primary
         : colorScheme.onSurface;
+    final now = DateTime.now();
+    bool isCurrentMonth(DateTime date) =>
+        date.year == now.year && date.month == now.month;
+    final monthFuel = _entries
+        .where((entry) => isCurrentMonth(entry.date))
+        .fold<double>(0, (total, entry) => total + entry.total);
+    final monthLunch = _includeLunch
+        ? _lunchTotal(
+            _lunchEntries.where((entry) => isCurrentMonth(entry.date)))
+        : 0.0;
+    final monthSpent = _includeLunch && _lunchLoadError != null
+        ? 'Unavailable'
+        : _money.format(monthFuel + monthLunch);
+    final appBarColor =
+        theme.appBarTheme.backgroundColor ?? colorScheme.surface;
+    final monthTextColor =
+        ThemeData.estimateBrightnessForColor(appBarColor) == Brightness.dark
+            ? Colors.white
+            : Colors.black;
+    final narrowAppBar = MediaQuery.sizeOf(context).width < 480;
+    final appBarTitle = Text(
+      MediaQuery.sizeOf(context).width < 400 &&
+              widget.settingsPageBuilder != null
+          ? 'FuelLog'
+          : 'Fuel Fill-ups Log',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+    );
     return Scaffold(
       backgroundColor: _loaded ? null : Colors.white,
       appBar: _loaded
           ? AppBar(
               centerTitle: true,
-              leading: PopupMenuButton<_HomeMenuAction>(
-                tooltip: 'App menu',
-                icon: const Icon(Icons.menu),
-                style: IconButton.styleFrom(
-                  side: BorderSide(color: colorScheme.secondary),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+              leadingWidth: 120,
+              leading: Row(
+                children: [
+                  SizedBox(
+                    width: 56,
+                    child: PopupMenuButton<_HomeMenuAction>(
+                      tooltip: 'App menu',
+                      icon: const Icon(Icons.menu),
+                      style: IconButton.styleFrom(
+                        side: BorderSide(color: colorScheme.secondary),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      onSelected: (action) {
+                        switch (action) {
+                          case _HomeMenuAction.bluetoothShare:
+                            _openBluetoothShare();
+                            break;
+                          case _HomeMenuAction.loadCsv:
+                            unawaited(_importCsv());
+                            break;
+                          case _HomeMenuAction.saveCsv:
+                            unawaited(_exportCsv());
+                            break;
+                          case _HomeMenuAction.shareCsv:
+                            unawaited(_shareCsvBackup());
+                            break;
+                          case _HomeMenuAction.about:
+                            unawaited(_showAbout());
+                            break;
+                          case _HomeMenuAction.wipeData:
+                            unawaited(_confirmWipeData());
+                            break;
+                          case _HomeMenuAction.reports:
+                            _openReports();
+                            break;
+                        }
+                      },
+                      itemBuilder: (context) => <PopupMenuItem<_HomeMenuAction>>[
+                        if (!kIsWeb && widget.bluetoothSharePageBuilder != null)
+                          PopupMenuItem(
+                            enabled: widget.bluetoothShareEnabled,
+                            value: _HomeMenuAction.bluetoothShare,
+                            child: const _HomeMenuEntry(
+                              icon: Icons.bluetooth,
+                              label: 'Bluetooth Share',
+                            ),
+                          ),
+                        const PopupMenuItem(
+                          value: _HomeMenuAction.reports,
+                          child: _HomeMenuEntry(
+                            icon: Icons.picture_as_pdf_outlined,
+                            label: 'Reports',
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: _HomeMenuAction.loadCsv,
+                          child: _HomeMenuEntry(
+                            icon: Icons.file_upload_outlined,
+                            label: 'Load CSV',
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: _HomeMenuAction.saveCsv,
+                          child: _HomeMenuEntry(
+                            icon: Icons.file_download_outlined,
+                            label: 'Save CSV',
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: _HomeMenuAction.shareCsv,
+                          child: _HomeMenuEntry(
+                            icon: Icons.cloud_upload_outlined,
+                            label: 'Share CSV backup',
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: _HomeMenuAction.about,
+                          child: _HomeMenuEntry(
+                            icon: Icons.info_outline,
+                            label: 'About',
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: _HomeMenuAction.wipeData,
+                          child: _HomeMenuEntry(
+                            icon: Icons.delete_forever_outlined,
+                            label: 'Wipe Data',
+                          ),
+                        ),
+                      ].map((item) => _OutlinedPopupMenuEntry(item: item)).toList(),
+                    ),
                   ),
-                ),
-                onSelected: (action) {
-                  switch (action) {
-                    case _HomeMenuAction.bluetoothShare:
-                      _openBluetoothShare();
-                      break;
-                    case _HomeMenuAction.loadCsv:
-                      unawaited(_importCsv());
-                      break;
-                    case _HomeMenuAction.saveCsv:
-                      unawaited(_exportCsv());
-                      break;
-                    case _HomeMenuAction.shareCsv:
-                      unawaited(_shareCsvBackup());
-                      break;
-                    case _HomeMenuAction.about:
-                      unawaited(_showAbout());
-                      break;
-                    case _HomeMenuAction.wipeData:
-                      unawaited(_confirmWipeData());
-                      break;
-                    case _HomeMenuAction.reports:
-                      _openReports();
-                      break;
-                  }
-                },
-                itemBuilder: (context) => <PopupMenuItem<_HomeMenuAction>>[
-                  if (!kIsWeb && widget.bluetoothSharePageBuilder != null)
-                    PopupMenuItem(
-                      enabled: widget.bluetoothShareEnabled,
-                      value: _HomeMenuAction.bluetoothShare,
-                      child: const _HomeMenuEntry(
-                        icon: Icons.bluetooth,
-                        label: 'Bluetooth Share',
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'This month\n$monthSpent',
+                        key: const ValueKey('app-bar-month-spent'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: monthTextColor,
+                          fontFamily: 'Oswald',
+                          fontSize: 10,
+                        ),
                       ),
                     ),
-                  const PopupMenuItem(
-                    value: _HomeMenuAction.reports,
-                    child: _HomeMenuEntry(
-                      icon: Icons.picture_as_pdf_outlined,
-                      label: 'Reports',
-                    ),
                   ),
-                  const PopupMenuItem(
-                    value: _HomeMenuAction.loadCsv,
-                    child: _HomeMenuEntry(
-                      icon: Icons.file_upload_outlined,
-                      label: 'Load CSV',
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: _HomeMenuAction.saveCsv,
-                    child: _HomeMenuEntry(
-                      icon: Icons.file_download_outlined,
-                      label: 'Save CSV',
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: _HomeMenuAction.shareCsv,
-                    child: _HomeMenuEntry(
-                      icon: Icons.cloud_upload_outlined,
-                      label: 'Share CSV backup',
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: _HomeMenuAction.about,
-                    child: _HomeMenuEntry(
-                      icon: Icons.info_outline,
-                      label: 'About',
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: _HomeMenuAction.wipeData,
-                    child: _HomeMenuEntry(
-                      icon: Icons.delete_forever_outlined,
-                      label: 'Wipe Data',
-                    ),
-                  ),
-                ].map((item) => _OutlinedPopupMenuEntry(item: item)).toList(),
+                ],
               ),
-              title: const Text(
-                'Fuel Fill-ups Log',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
+              title: narrowAppBar ? null : appBarTitle,
+              bottom: narrowAppBar
+                  ? PreferredSize(
+                      preferredSize: Size.fromHeight(
+                        MediaQuery.textScalerOf(context).scale(18) + 10,
+                      ),
+                      child: Center(child: appBarTitle),
+                    )
+                  : null,
               actions: [
+                if (widget.settingsPageBuilder != null)
+                  IconButton(
+                    tooltip: 'Settings',
+                    icon: const Icon(Icons.settings_outlined),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: widget.settingsPageBuilder!,
+                      ),
+                    ),
+                  ),
                 IconButton(
                   tooltip: widget.isDarkTheme
                       ? 'Switch to light theme'

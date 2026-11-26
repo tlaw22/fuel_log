@@ -72,6 +72,7 @@ void main() {
       ]),
     });
     await start(tester);
+    expect(find.text('This month\n\$50.00'), findsOneWidget);
     await navigate(tester, 'Totals');
     expect(find.text('Lunch spent'), findsNothing);
     await reachControl(tester, 'totals');
@@ -80,6 +81,7 @@ void main() {
       matching: find.text('On'),
     ));
     await tester.pumpAndSettle();
+    expect(find.text('This month\n\$60.00'), findsOneWidget);
     expect(find.text('Fuel spent'), findsWidgets);
     expect(find.text('Lunch spent'), findsWidgets);
     expect(find.text('Combined spent'), findsWidgets);
@@ -105,6 +107,7 @@ void main() {
       matching: find.text('Off'),
     ));
     await tester.pumpAndSettle();
+    expect(find.text('This month\n\$50.00'), findsOneWidget);
     await navigate(tester, 'Totals');
     expect(find.text('Combined spent'), findsNothing);
     await reachControl(tester, 'totals');
@@ -276,6 +279,7 @@ void main() {
         find.byKey(const ValueKey('lunch-price-input')), '12');
     await tester.tap(find.text('Save lunch'));
     await tester.pumpAndSettle();
+    expect(find.text('This month\n\$12.00'), findsOneWidget);
     await navigate(tester, 'Totals');
     expect(find.text('No fill-ups yet'), findsNothing);
     expect(find.text('Lunch spent'), findsWidgets);
@@ -292,6 +296,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Delete'));
     await tester.pumpAndSettle();
+    expect(find.text('This month\n\$0.00'), findsOneWidget);
     await navigate(tester, 'Totals');
     expect(find.text('No fill-ups yet'), findsOneWidget);
     expect(find.text('Lunch spent'), findsNothing);
@@ -332,6 +337,7 @@ void main() {
       'lunch_entries_v1': 'invalid json',
     });
     await start(tester);
+    expect(find.text('This month\nUnavailable'), findsOneWidget);
     await navigate(tester, 'Totals');
     expect(find.textContaining('Could not load lunch data:'), findsOneWidget);
     await tester.tap(find.descendant(
@@ -339,6 +345,7 @@ void main() {
       matching: find.text('Off'),
     ));
     await tester.pumpAndSettle();
+    expect(find.text('This month\n\$0.00'), findsOneWidget);
     expect(find.text('No fill-ups yet'), findsOneWidget);
   });
 }

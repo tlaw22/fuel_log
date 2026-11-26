@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Web install prompt tests</title>
+</head>
+<body>
+  <p id="result">Running install prompt tests...</p>
+  <script src="web_install_prompt_test.js"></script>
+  <script>
+    window.runInstallPromptTests().then((result) => {
+      document.getElementById('result').textContent = result;
+    }).catch((error) => {
+      document.getElementById('result').textContent = `Failed: ${error.message}`;
+      console.error(error);
+    });
+  </script>
+</body>
+</html>

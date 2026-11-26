@@ -401,6 +401,12 @@ class _LunchPageState extends State<LunchPage> {
                   'always pack your lunch while traveling.',
               triggerMode: TooltipTriggerMode.manual,
               child: IconButton.outlined(
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(24, 24),
+                  fixedSize: const Size(24, 24),
+                  padding: EdgeInsets.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
                 onPressed: () =>
                     _infoTooltipKey.currentState?.ensureTooltipVisible(),
                 icon: const Icon(Icons.help_outline, size: 12),

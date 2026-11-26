@@ -32,6 +32,16 @@ Future<void> _pumpStartupToCompletion(WidgetTester tester) async {
 }
 
 void main() {
+  setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized()
+        .platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+  });
+  tearDown(() {
+    TestWidgetsFlutterBinding.ensureInitialized()
+        .platformDispatcher.clearAccessibilityFeaturesTestValue();
+  });
+
   test('BBH Bogle is the global text font', () {
     final theme = buildTheme();
     final lightTheme = buildTheme(isDark: false);
@@ -141,6 +151,274 @@ void main() {
       Brightness.light,
     );
     expect(find.byTooltip('Switch to dark theme'), findsOneWidget);
+  });
+
+  testWidgets('AppBar monthly total updates when a fill-up is deleted or restored',
+      (tester) async {
+    final now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'fuel_entries_v1': jsonEncode([
+        _entry(id: 'current', updatedAt: now, date: now, price: 5).toJson(),
+        _entry(
+          id: 'previous-year',
+          updatedAt: now,
+          date: DateTime(now.year - 1, now.month, 1),
+          price: 9,
+        ).toJson(),
+      ]),
+    });
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await _pumpStartupToCompletion(tester);
+
+    final total = find.byKey(const ValueKey('app-bar-month-spent'));
+    expect(tester.widget<Text>(total).data, 'This month\n\$50.00');
+    await tester.drag(
+        find.byKey(const ValueKey('current')), const Offset(-600, 0));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(total).data, 'This month\n\$0.00');
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(total).data, 'This month\n\$50.00');
+  });
+
+  testWidgets('AppBar monthly total fits and contrasts in every palette',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    for (final (isDark, palette) in [
+      (true, 'classic'),
+      (true, 'forest'),
+      (true, 'purpleRaindrops'),
+      (false, 'classic'),
+      (false, 'sage'),
+      (false, 'rose'),
+    ]) {
+      SharedPreferences.setMockInitialValues({
+        'fuel_theme_is_dark_v1': isDark,
+        if (isDark) 'fuel_dark_palette_v1': palette,
+        if (!isDark) 'fuel_light_palette_v1': palette,
+      });
+      await tester.pumpWidget(FuelLogApp(key: ValueKey('$isDark-$palette')));
+      await _pumpStartupToCompletion(tester);
+      final total = find.byKey(const ValueKey('app-bar-month-spent'));
+      final text = tester.widget<Text>(total);
+      final theme = Theme.of(tester.element(total));
+      final foreground = text.style!.color!.computeLuminance();
+      final background = theme.appBarTheme.backgroundColor!.computeLuminance();
+      final contrast = foreground > background
+          ? (foreground + 0.05) / (background + 0.05)
+          : (background + 0.05) / (foreground + 0.05);
+      expect(text.style!.fontFamily, 'Oswald');
+      expect(text.style!.fontSize, 10);
+      expect(text.style!.color, isNot(theme.appBarTheme.foregroundColor));
+      expect(contrast, greaterThanOrEqualTo(4.5));
+      expect(tester.getTopLeft(total).dx,
+          greaterThanOrEqualTo(tester.getTopRight(find.byTooltip('App menu')).dx));
+      expect(tester.getTopRight(total).dx,
+          lessThanOrEqualTo(tester.getTopLeft(find.byTooltip('Settings')).dx));
+      expect(tester.getSize(find.text('FuelLog')).width, greaterThan(40));
+      expect(tester.takeException(), isNull);
+    }
+    tester.view.physicalSize = const Size(480, 800);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.text('Fuel Fill-ups Log')).width, greaterThan(80));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('settings updates and restores both theme palettes',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({
+      'fuel_theme_is_dark_v1': true,
+      'fuel_dark_palette_v1': 'forest',
+      'fuel_light_palette_v1': 'rose',
+    });
+    await tester.pumpWidget(const FuelLogApp());
+    await _pumpStartupToCompletion(tester);
+
+    final settings = find.byTooltip('Settings');
+    final toggle = find.byTooltip('Switch to light theme');
+    expect(tester.getTopLeft(settings).dx, lessThan(tester.getTopLeft(toggle).dx));
+    expect(find.text('FuelLog'), findsOneWidget);
+    await tester.tap(settings);
+    await tester.pumpAndSettle();
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(tester.widget<SwitchListTile>(
+        find.widgetWithText(SwitchListTile, 'Dark mode')).value, isTrue);
+    expect(find.text('Forest'), findsOneWidget);
+
+    Future<void> choose(String name) async {
+      await tester.tap(find.text('Color palette'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.ancestor(
+        of: find.text(name),
+        matching: find.byType(CheckedPopupMenuItem<ThemePalette>),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    await choose('Purple Raindrops');
+    expect(find.text('Purple Raindrops'), findsOneWidget);
+    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!
+        .scaffoldBackgroundColor,
+        buildTheme(palette: ThemePalette.purpleRaindrops).scaffoldBackgroundColor);
+    await tester.tap(find.text('Dark mode'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(
+        find.widgetWithText(SwitchListTile, 'Dark mode')).value, isFalse);
+    expect(find.text('Rose'), findsOneWidget);
+    await choose('Sage');
+    expect(find.text('Sage'), findsOneWidget);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('fuel_theme_is_dark_v1'), isFalse);
+    expect(prefs.getString('fuel_dark_palette_v1'), 'purpleRaindrops');
+    expect(prefs.getString('fuel_light_palette_v1'), 'sage');
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Switch to dark theme'), findsOneWidget);
+    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!
+        .scaffoldBackgroundColor,
+        buildTheme(isDark: false, palette: ThemePalette.sage).scaffoldBackgroundColor);
+    await tester.tap(find.byTooltip('Switch to dark theme'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Purple Raindrops'), findsOneWidget);
+    expect(tester.widget<SwitchListTile>(
+        find.widgetWithText(SwitchListTile, 'Dark mode')).value, isTrue);
+    await tester.tap(find.text('Dark mode'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sage'), findsOneWidget);
+    await tester.pumpWidget(const FuelLogApp(key: ValueKey('settings-relaunch')));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sage'), findsOneWidget);
+    expect(tester.widget<SwitchListTile>(
+        find.widgetWithText(SwitchListTile, 'Dark mode')).value, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('font size applies across the app and respects device scaling',
+      (tester) async {
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1;
+    tester.binding.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.binding.platformDispatcher.clearTextScaleFactorTestValue);
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const FuelLogApp());
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    double scaledSize() =>
+        MediaQuery.textScalerOf(tester.element(find.text('Font size'))).scale(20);
+    expect(find.text('100%'), findsOneWidget);
+    expect(scaledSize(), closeTo(30, 0.001));
+    await tester.tap(find.byTooltip('Decrease font size'));
+    await tester.pumpAndSettle();
+    expect(find.text('80%'), findsOneWidget);
+    expect(scaledSize(), closeTo(24, 0.001));
+    await tester.tap(find.byTooltip('Decrease font size'));
+    await tester.pumpAndSettle();
+    expect(find.text('60%'), findsOneWidget);
+    expect(scaledSize(), closeTo(18, 0.001));
+    expect(
+      tester.widget<IconButton>(find.ancestor(
+        of: find.byTooltip('Decrease font size'),
+        matching: find.byType(IconButton),
+      )).onPressed,
+      isNull,
+    );
+    for (final value in ['80%', '100%', '120%']) {
+      await tester.tap(find.byTooltip('Increase font size'));
+      await tester.pumpAndSettle();
+      expect(find.text(value), findsOneWidget);
+    }
+    expect(scaledSize(), closeTo(36, 0.001));
+    expect(
+      tester.widget<IconButton>(find.ancestor(
+        of: find.byTooltip('Increase font size'),
+        matching: find.byType(IconButton),
+      )).onPressed,
+      isNull,
+    );
+    tester.binding.platformDispatcher.textScaleFactorTestValue = 1.2;
+    await tester.pumpAndSettle();
+    expect(scaledSize(), closeTo(28.8, 0.001));
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('fuel_font_size_percent_v1'), 120);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(MediaQuery.textScalerOf(tester.element(find.byTooltip('Settings')))
+        .scale(20), closeTo(28.8, 0.001));
+    await tester.pumpWidget(const FuelLogApp(key: ValueKey('font-relaunch')));
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('120%'), findsOneWidget);
+    expect(scaledSize(), closeTo(28.8, 0.001));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('invalid saved font size is reported and does not change theme',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'fuel_font_size_percent_v1': 110,
+      'fuel_theme_is_dark_v1': false,
+      'fuel_light_palette_v1': 'rose',
+    });
+    final errors = <FlutterErrorDetails>[];
+    final oldHandler = FlutterError.onError;
+    FlutterError.onError = errors.add;
+    addTearDown(() => FlutterError.onError = oldHandler);
+    await tester.pumpWidget(const FuelLogApp());
+    await _pumpStartupToCompletion(tester);
+    expect(errors, hasLength(1));
+    expect(errors.single.exception, isA<FormatException>());
+    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!
+        .scaffoldBackgroundColor,
+        buildTheme(isDark: false, palette: ThemePalette.rose).scaffoldBackgroundColor);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('100%'), findsOneWidget);
+    expect(find.text('Rose'), findsOneWidget);
+  });
+
+  testWidgets('large app text keeps narrow navigation and settings usable',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.binding.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.binding.platformDispatcher.clearTextScaleFactorTestValue);
+    SharedPreferences.setMockInitialValues({'fuel_font_size_percent_v1': 120});
+    await tester.pumpWidget(const FuelLogApp());
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('120%'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    for (final section in ['Totals', 'Charts']) {
+      await tester.tap(find.byWidgetPredicate(
+        (widget) =>
+            widget is Semantics && widget.properties.label == '$section page',
+      ));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('Log my budget data'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   test('new palettes have readable text and controls', () {
@@ -592,6 +870,7 @@ void main() {
     });
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
     await _pumpStartupToCompletion(tester);
+    expect(find.text('This month\n\$0.00'), findsOneWidget);
     await tester.tap(find.text('Fill-up'));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -607,6 +886,7 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(
         jsonDecode(prefs.getString('fuel_entries_v1')!) as List, hasLength(1));
+    expect(find.text('This month\n\$50.00'), findsOneWidget);
     expect(calls, isEmpty);
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 

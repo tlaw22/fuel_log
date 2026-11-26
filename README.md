@@ -49,13 +49,18 @@ custom chart adds this month's lunch as a third slice; selected amounts may
 overlap. Its remaining-budget value also accounts for lunch. Fuel volume,
 distance, and efficiency remain fuel-only. Fuel CSV
 exports, reports, and fill-up notifications are unchanged.
+Next to the AppBar menu, this month's spending shows fuel and, when enabled,
+lunch. If lunch data cannot be loaded, the combined total is unavailable.
 
 ## Theme
 
 The AppBar theme icon switches between dark and light modes. The palette icon
 offers three choices for the active mode, including Purple Raindrops in dark
-mode. The mode and each mode's selected palette are saved locally and restored
-the next time the app starts.
+mode. The Settings page also provides both controls. The mode and each mode's
+selected palette are saved locally and restored the next time the app starts.
+Settings also adjusts app text from 60% to 120% of the device text size in
+20% steps. Theme-colored background bubbles can also be disabled in Settings.
+Both preferences are saved locally; reduced-motion settings pause bubble motion.
 
 ## Pump photos (Android)
 
@@ -159,9 +164,20 @@ slideshow is available from the sharing page.
 Your log stays on this device unless you explicitly use Bluetooth sharing or
 export or share a CSV backup.
 
+## Install the web app
+
+On phones, Chrome, Edge, and Safari can show an invitation to install FuelLog.
+Use the browser's install prompt when available, or follow the Add to Home
+Screen instructions. The invitation can be dismissed for the browser session
+and does not appear when FuelLog is running as an installed app. Installation
+requires HTTPS or localhost.
+
+Saved data may not carry over to the installed app. Export a CSV backup first;
+CSV backups do not include all app data.
+
 ## App icons
 
-The launcher icons are generated from `lib/img/app-icon.png` with
+The launcher icons are generated from `lib/img/app-icon.jpg` with
 `dart run flutter_launcher_icons`. Linux bundles the generated 512-pixel web
 icon for its window; desktop launcher integration depends on the Linux package
 and desktop environment.
