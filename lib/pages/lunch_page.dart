@@ -1,8 +1,13 @@
+/// Lunch and restaurant expense page.
+/// Records lunch purchases and provides restaurant totals, charts, budgets, and recurring entries.
 part of '../app.dart';
 
 const _lunchEntriesKey = 'lunch_entries_v1';
 const _lunchBudgetKey = 'lunch_daily_budget_v1';
 const _lunchChartSelectionKey = 'lunch_chart_selection_v1';
+const _restaurantCsvKey = 'lunch_restaurants_csv_v1';
+const _restaurantFileKey = 'lunch_restaurants_file_v1';
+const _restaurantFileName = 'lunch_restaurants.csv';
 const _lunchChartDefaults = ['today', 'remaining'];
 const _lunchMetricLabels = {
   'today': 'Lunch today',
@@ -14,6 +19,7 @@ const _lunchMetricLabels = {
 };
 Future<void>? _pendingLunchChartSave;
 Future<void>? _pendingLunchEntriesSave;
+Future<void>? _pendingRestaurantSave;
 
 class _LunchEntry {
   const _LunchEntry({
@@ -71,6 +77,141 @@ String? _validateLunchAmount(String? value) {
   return null;
 }
 
+List<String> _parseRestaurantCsv(String csv) {
+  final rows = _decodeCsv(csv);
+  if (rows.isEmpty ||
+      rows.first.length != 1 ||
+      rows.first.first.replaceFirst('\uFEFF', '').trim() != 'Chain') {
+    throw const FormatException(
+        'Expected a restaurant CSV with a Chain header.');
+  }
+  final names = <String>[];
+  final seen = <String>{};
+  for (var index = 1; index < rows.length; index++) {
+    final row = rows[index];
+    if (row.length != 1) {
+      throw FormatException('Invalid restaurant CSV row ${index + 1}.');
+    }
+    final name = row.first.trim();
+    if (name.isNotEmpty && seen.add(name.toLowerCase())) names.add(name);
+  }
+  return names;
+}
+
+String _restaurantCsv(List<String> names) =>
+    ['Chain', ...names.map(_csvField)].join('\r\n');
+
+Future<File> _restaurantFile() async {
+  final directory = await getApplicationDocumentsDirectory();
+  return File('${directory.path}${Platform.pathSeparator}FuelLog'
+      '${Platform.pathSeparator}$_restaurantFileName');
+}
+
+Future<List<String>> _readRestaurants(SharedPreferences prefs) async {
+  final String csv;
+  if (kIsWeb && prefs.containsKey(_restaurantCsvKey)) {
+    csv = prefs.getString(_restaurantCsvKey)!;
+  } else if (!kIsWeb && (prefs.getBool(_restaurantFileKey) ?? false)) {
+    csv = await (await _restaurantFile()).readAsString();
+  } else {
+    csv = await rootBundle.loadString(
+      'lib/assets/fast_food_chains.csv',
+      cache: false,
+    );
+  }
+  return _parseRestaurantCsv(csv);
+}
+
+Future<void> _writeRestaurants(List<String> restaurants,
+    {bool replaceExistingFile = false}) {
+  final previous = _pendingRestaurantSave;
+  final save = () async {
+    if (previous != null) await previous;
+    final csv = _restaurantCsv(restaurants);
+    final prefs = await SharedPreferences.getInstance();
+    if (kIsWeb) {
+      if (!await prefs.setString(_restaurantCsvKey, csv)) {
+        throw StateError('Could not save the restaurant list.');
+      }
+    } else {
+      final file = await _restaurantFile();
+      final temporary = File('${file.path}.tmp');
+      await file.parent.create(recursive: true);
+      if (!replaceExistingFile &&
+          !(prefs.getBool(_restaurantFileKey) ?? false) &&
+          await file.exists()) {
+        throw StateError('Restaurant file already exists at ${file.path}. '
+            'Import it before saving a new restaurant.');
+      }
+      try {
+        await temporary.writeAsString(csv, flush: true);
+        await temporary.rename(file.path);
+      } finally {
+        if (await temporary.exists()) await temporary.delete();
+      }
+      if (!await prefs.setBool(_restaurantFileKey, true)) {
+        throw StateError('Could not save the restaurant file setting.');
+      }
+    }
+  }();
+  final pending =
+      save.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+  _pendingRestaurantSave = pending;
+  unawaited(pending.whenComplete(() {
+    if (identical(_pendingRestaurantSave, pending)) {
+      _pendingRestaurantSave = null;
+    }
+  }));
+  return save;
+}
+
+List<_LunchEntry> _parseLunchCsv(String csv) {
+  final rows = _decodeCsv(csv);
+  if (rows.isEmpty ||
+      rows.first.length != 3 ||
+      rows.first[0].replaceFirst('\uFEFF', '').trim() != 'Date' ||
+      rows.first[1].trim() != 'Restaurant' ||
+      rows.first[2].trim() != 'Price') {
+    throw const FormatException('This is not a FuelLog lunch CSV file.');
+  }
+  final entries = <_LunchEntry>[];
+  for (var index = 1; index < rows.length; index++) {
+    final row = rows[index];
+    if (row.length == 1 && row.first.trim().isEmpty) continue;
+    if (row.length != 3) {
+      throw FormatException(
+          'Invalid lunch CSV row ${index + 1}: wrong number of columns.');
+    }
+    try {
+      final restaurant = row[1].trim();
+      final price = double.parse(row[2].trim());
+      if (restaurant.isEmpty || !price.isFinite || price < 0) {
+        throw const FormatException(
+            'Restaurant and non-negative price are required.');
+      }
+      entries.add(_LunchEntry(
+        restaurant: restaurant,
+        date: DateTime.parse(row[0].trim()),
+        price: price,
+      ));
+    } on FormatException catch (error) {
+      throw FormatException(
+          'Invalid lunch CSV row ${index + 1}: ${error.message}');
+    }
+  }
+  return entries;
+}
+
+String _lunchCsv(List<_LunchEntry> entries) => [
+      'Date,Restaurant,Price',
+      for (final entry in entries)
+        [
+          entry.date.toIso8601String(),
+          entry.restaurant,
+          entry.price.toString(),
+        ].map(_csvField).join(','),
+    ].join('\r\n');
+
 /// Records lunch purchases separately from the fuel log.
 class LunchPage extends StatefulWidget {
   const LunchPage({super.key}) : _onEntriesChanged = null;
@@ -108,28 +249,21 @@ class _LunchPageState extends State<LunchPage> {
       _error = null;
     });
     try {
-      final csv = await rootBundle.loadString(
-        'lib/assets/fast_food_chains.csv',
-        cache: false,
-      );
-      final lines = const LineSplitter().convert(csv);
-      if (lines.isEmpty || lines.first.trim() != 'Chain') {
-        throw const FormatException('Invalid restaurant list');
-      }
-      final restaurants = lines.skip(1).map((line) => line.trim())
-          .where((line) => line.isNotEmpty).toList();
       await _pendingLunchChartSave;
       await _pendingLunchEntriesSave;
+      await _pendingRestaurantSave;
       final prefs = await SharedPreferences.getInstance();
+      final restaurants = await _readRestaurants(prefs);
       final entries = _readLunchEntries(prefs);
       final budget = prefs.getDouble(_lunchBudgetKey);
       if (budget != null && (!budget.isFinite || budget < 0)) {
         throw const FormatException('Invalid lunch budget');
       }
-      final selection = prefs.getStringList(_lunchChartSelectionKey) ??
-          _lunchChartDefaults;
+      final selection =
+          prefs.getStringList(_lunchChartSelectionKey) ?? _lunchChartDefaults;
       if (selection.length != 2 ||
-          selection.any((key) => !_lunchMetricLabels.containsKey(key) &&
+          selection.any((key) =>
+              !_lunchMetricLabels.containsKey(key) &&
               !(key.startsWith('restaurant:') && key.length > 11))) {
         throw const FormatException('Invalid lunch chart selection');
       }
@@ -151,28 +285,45 @@ class _LunchPageState extends State<LunchPage> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(SnackBar(
       content: Text(message),
       duration: kAppSnackBarDuration,
     ));
   }
 
-  Future<void> _saveEntries(List<_LunchEntry> entries) async {
+  Future<void> _saveEntries(List<_LunchEntry> entries,
+      {String? restaurantToAdd}) async {
     setState(() => _saving = true);
     final onEntriesChanged = widget._onEntriesChanged;
     final previous = _pendingLunchEntriesSave;
     final save = () async {
       if (previous != null) await previous;
       final prefs = await SharedPreferences.getInstance();
-      if (!await prefs.setString(
-          _lunchEntriesKey, jsonEncode(entries.map((e) => e.toJson()).toList()))) {
+      if (restaurantToAdd != null &&
+          !_restaurants.any(
+              (name) => name.toLowerCase() == restaurantToAdd.toLowerCase())) {
+        final restaurants = await _readRestaurants(prefs);
+        if (!restaurants.any(
+            (name) => name.toLowerCase() == restaurantToAdd.toLowerCase())) {
+          restaurants.add(restaurantToAdd);
+          await _writeRestaurants(restaurants);
+        }
+        if (mounted) setState(() => _restaurants = restaurants);
+      }
+      if (!await prefs.setString(_lunchEntriesKey,
+          jsonEncode(entries.map((e) => e.toJson()).toList()))) {
         throw StateError('Storage did not confirm the save');
       }
     }();
-    final pending = save.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    final pending =
+        save.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     _pendingLunchEntriesSave = pending;
     unawaited(pending.whenComplete(() {
-      if (identical(_pendingLunchEntriesSave, pending)) _pendingLunchEntriesSave = null;
+      if (identical(_pendingLunchEntriesSave, pending)) {
+        _pendingLunchEntriesSave = null;
+      }
     }));
     try {
       await save;
@@ -197,7 +348,8 @@ class _LunchPageState extends State<LunchPage> {
       showDragHandle: true,
       builder: (_) => _LunchEntryForm(
         restaurants: _restaurants,
-        onSave: (entry) => _saveEntries([..._entries, entry]),
+        onSave: (entry) => _saveEntries([..._entries, entry],
+            restaurantToAdd: entry.restaurant),
         onValidatedSavePressed: () {
           if (kIsWeb) {
             browserPermission = FuelLogNotifications.requestBrowserPermission();
@@ -216,7 +368,9 @@ class _LunchPageState extends State<LunchPage> {
       await _LunchNotification.show(saved, entries, budget);
       if (mounted) _showError('Lunch saved.');
     } catch (error) {
-      if (mounted) _showError('Lunch saved, but notification failed: $error');
+      if (mounted) {
+        FuelLogNotifications.reportFailure(context, error, lunch: true);
+      }
     }
   }
 
@@ -243,6 +397,94 @@ class _LunchPageState extends State<LunchPage> {
       await _saveEntries(_entries.where((item) => item != entry).toList());
     } catch (error) {
       if (mounted) _showError('Could not delete lunch entry: $error');
+    }
+  }
+
+  Future<bool> _confirmCsvReplacement(String description) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Replace current data?'),
+            content: Text(description),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Replace'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _importCsv({required bool restaurants}) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      final file = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(label: 'CSV files', extensions: ['csv']),
+        ],
+      );
+      if (file == null) return;
+      final source = await file.readAsString();
+      if (!mounted) return;
+      if (restaurants) {
+        final imported = _parseRestaurantCsv(source);
+        final confirmed = await _confirmCsvReplacement(
+          'Replace the restaurant list with ${imported.length} '
+          'restaurant${imported.length == 1 ? '' : 's'} from ${file.name}? '
+          'The saved restaurant list will be overwritten.',
+        );
+        if (!confirmed || !mounted) return;
+        await _writeRestaurants(imported, replaceExistingFile: true);
+        if (!mounted) return;
+        setState(() => _restaurants = imported);
+        if (_error != null) {
+          await _load();
+          if (!mounted || _error != null) return;
+        }
+        _showError('Loaded ${imported.length} restaurants from ${file.name}.');
+      } else {
+        final imported = _parseLunchCsv(source);
+        final confirmed = await _confirmCsvReplacement(
+          'Replace all lunch entries with ${imported.length} '
+          'entr${imported.length == 1 ? 'y' : 'ies'} from ${file.name}? '
+          'Fuel entries will not be changed.',
+        );
+        if (!confirmed || !mounted) return;
+        await _saveEntries(imported);
+        if (!mounted) return;
+        _showError(
+            'Loaded ${imported.length} lunch entries from ${file.name}.');
+      }
+    } catch (error) {
+      if (mounted) _showError('Could not import CSV: $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _exportCsv({required bool restaurants}) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      final name = restaurants
+          ? _restaurantFileName
+          : 'lunch_log_${DateFormat('yyyy-MM-dd').format(DateTime.now())}.csv';
+      final csv =
+          restaurants ? _restaurantCsv(_restaurants) : _lunchCsv(_entries);
+      final saved =
+          await _saveCsvFile(name, Uint8List.fromList(utf8.encode(csv)));
+      if (saved != null && mounted) _showError('CSV saved to $saved');
+    } catch (error) {
+      if (mounted) _showError('Could not export CSV: $error');
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -307,10 +549,13 @@ class _LunchPageState extends State<LunchPage> {
         throw StateError('Storage did not confirm the save');
       }
     }();
-    final pending = save.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    final pending =
+        save.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     _pendingLunchChartSave = pending;
     unawaited(pending.whenComplete(() {
-      if (identical(_pendingLunchChartSave, pending)) _pendingLunchChartSave = null;
+      if (identical(_pendingLunchChartSave, pending)) {
+        _pendingLunchChartSave = null;
+      }
     }));
     unawaited(save.catchError((Object error, StackTrace stackTrace) {
       FlutterError.reportError(FlutterErrorDetails(
@@ -332,6 +577,10 @@ class _LunchPageState extends State<LunchPage> {
           children: [
             Text('Could not load lunch data: $_error'),
             TextButton(onPressed: _load, child: const Text('Retry')),
+            TextButton(
+              onPressed: _saving ? null : () => _importCsv(restaurants: true),
+              child: const Text('Import restaurants CSV'),
+            ),
           ],
         ),
       );
@@ -340,21 +589,28 @@ class _LunchPageState extends State<LunchPage> {
     final today = _lunchDay(now);
     final week = _lunchWeek(now);
     final nextWeek = DateTime(week.year, week.month, week.day + 7);
-    final todayTotal = _lunchTotal(_entries.where((e) => _lunchDay(e.date) == today));
-    final weekTotal = _lunchTotal(_entries.where(
-        (e) => !_lunchDay(e.date).isBefore(week) && _lunchDay(e.date).isBefore(nextWeek)));
-    final monthTotal = _lunchTotal(_entries.where(
-        (e) => e.date.year == now.year && e.date.month == now.month));
     final restaurantNames = <String, String>{};
     final restaurantTotals = <String, double>{};
+    var todayTotal = 0.0;
+    var weekTotal = 0.0;
+    var monthTotal = 0.0;
     for (final entry in _entries) {
+      final day = _lunchDay(entry.date);
+      if (day == today) todayTotal += entry.price;
+      if (!day.isBefore(week) && day.isBefore(nextWeek)) {
+        weekTotal += entry.price;
+      }
+      if (entry.date.year == now.year && entry.date.month == now.month) {
+        monthTotal += entry.price;
+      }
       final key = 'restaurant:${entry.restaurant.trim().toLowerCase()}';
       restaurantNames.putIfAbsent(key, () => entry.restaurant);
       restaurantTotals.update(key, (total) => total + entry.price,
           ifAbsent: () => entry.price);
     }
     final restaurantKeys = restaurantNames.keys.toList()
-      ..sort((a, b) => restaurantNames[a]!.toLowerCase()
+      ..sort((a, b) => restaurantNames[a]!
+          .toLowerCase()
           .compareTo(restaurantNames[b]!.toLowerCase()));
     final labels = <String, String>{
       ..._lunchMetricLabels,
@@ -371,7 +627,8 @@ class _LunchPageState extends State<LunchPage> {
       'all': _lunchTotal(_entries),
       'budget': _budget,
       'remaining': _budget == null ? null : math.max(0, _budget! - todayTotal),
-      for (final key in labels.keys.where((key) => key.startsWith('restaurant:')))
+      for (final key
+          in labels.keys.where((key) => key.startsWith('restaurant:')))
         key: restaurantTotals[key] ?? 0,
     };
     final days = <DateTime, List<_LunchEntry>>{};
@@ -382,7 +639,8 @@ class _LunchPageState extends State<LunchPage> {
     final months = <DateTime, Map<DateTime, List<DateTime>>>{};
     for (final day in sortedDays) {
       final month = DateTime(day.year, day.month);
-      months.putIfAbsent(month, () => {})
+      months
+          .putIfAbsent(month, () => {})
           .putIfAbsent(_lunchWeek(day), () => [])
           .add(day);
     }
@@ -448,7 +706,8 @@ class _LunchPageState extends State<LunchPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(label, style: Theme.of(context).textTheme.bodySmall),
-                      Text(_money.format(amount), style: Theme.of(context).textTheme.titleMedium),
+                      Text(_money.format(amount),
+                          style: Theme.of(context).textTheme.titleMedium),
                     ],
                   ),
               ],
@@ -462,33 +721,37 @@ class _LunchPageState extends State<LunchPage> {
             child: ExpansionTile(
               initiallyExpanded: month == months.keys.first,
               title: Text(_monthFmt.format(month)),
-              subtitle: Text('Monthly total: ${_money.format(_lunchTotal(
-                months[month]!.values.expand((weekDays) => weekDays)
-                    .expand((day) => days[day]!)))}'),
+              subtitle: Text(
+                  'Monthly total: ${_money.format(_lunchTotal(months[month]!.values.expand((weekDays) => weekDays).expand((day) => days[day]!)))}'),
               children: [
                 for (final weekStart in months[month]!.keys)
                   ExpansionTile(
                     title: Text('Week of ${_dateFmt.format(weekStart)}'),
-                    subtitle: Text('Week total: ${_money.format(_lunchTotal(
-                      _entries.where((entry) => _lunchWeek(entry.date) == weekStart)))}'
-                      ' · Days in this month'),
+                    subtitle: Text(
+                        'Week total: ${_money.format(_lunchTotal(_entries.where((entry) => _lunchWeek(entry.date) == weekStart)))}'
+                        ' · Days in this month'),
                     children: [
                       for (final day in months[month]![weekStart]!)
                         ExpansionTile(
                           title: Text(_dateFmt.format(day)),
-                          subtitle: Text('Daily total: ${_money.format(_lunchTotal(days[day]!))}'),
+                          subtitle: Text(
+                              'Daily total: ${_money.format(_lunchTotal(days[day]!))}'),
                           children: [
                             for (final entry in days[day]!)
                               ListTile(
                                 title: Text(entry.restaurant),
-                                subtitle: Text(TimeOfDay.fromDateTime(entry.date).format(context)),
+                                subtitle: Text(
+                                    TimeOfDay.fromDateTime(entry.date)
+                                        .format(context)),
                                 trailing: Wrap(
                                   crossAxisAlignment: WrapCrossAlignment.center,
                                   children: [
                                     Text(_money.format(entry.price)),
                                     IconButton(
                                       tooltip: 'Delete lunch entry',
-                                      onPressed: _saving ? null : () => _deleteEntry(entry),
+                                      onPressed: _saving
+                                          ? null
+                                          : () => _deleteEntry(entry),
                                       icon: const Icon(Icons.delete_outline),
                                     ),
                                   ],
@@ -507,6 +770,29 @@ class _LunchPageState extends State<LunchPage> {
           amounts: amounts,
           selection: _chartSelection,
           onChanged: _changeChartSelection,
+        ),
+        Wrap(
+          spacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _saving ? null : () => _importCsv(restaurants: false),
+              icon: const Icon(Icons.upload_file),
+              label: const Text('Import lunch CSV'),
+            ),
+            OutlinedButton.icon(
+              onPressed: _saving ? null : () => _exportCsv(restaurants: false),
+              icon: const Icon(Icons.download),
+              label: const Text('Export lunch CSV'),
+            ),
+            OutlinedButton(
+              onPressed: _saving ? null : () => _importCsv(restaurants: true),
+              child: const Text('Import restaurants CSV'),
+            ),
+            OutlinedButton(
+              onPressed: _saving ? null : () => _exportCsv(restaurants: true),
+              child: const Text('Export restaurants CSV'),
+            ),
+          ],
         ),
       ],
     );
@@ -537,7 +823,8 @@ class _LunchBudgetChart extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _BudgetLegendRow(color: colors.primary, label: 'Spent', amount: spent),
+            _BudgetLegendRow(
+                color: colors.primary, label: 'Spent', amount: spent),
             _BudgetLegendRow(
               color: colors.surfaceContainerHighest,
               label: 'Remaining',
@@ -577,9 +864,8 @@ class _LunchCustomChart extends StatelessWidget {
     final first = amounts[selection[0]];
     final second = amounts[selection[1]];
     final total = (first ?? 0) + (second ?? 0);
-    final progress = first == null || second == null || total == 0
-        ? null
-        : first / total;
+    final progress =
+        first == null || second == null || total == 0 ? null : first / total;
 
     Widget selector(int index, String label) {
       final accent = colors.brightness == Brightness.dark
@@ -590,7 +876,8 @@ class _LunchCustomChart extends StatelessWidget {
           labelText: label,
           filled: true,
           fillColor: colors.surfaceContainerHighest,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: accent, width: 1.5),
@@ -643,7 +930,8 @@ class _LunchCustomChart extends StatelessWidget {
           const SizedBox(height: 12),
           _ChartSummary(
             progress: progress,
-            semanticsLabel: '${labels[selection[0]]} and ${labels[selection[1]]}',
+            semanticsLabel:
+                '${labels[selection[0]]} and ${labels[selection[1]]}',
             child: Column(
               children: [
                 _BudgetLegendRow(

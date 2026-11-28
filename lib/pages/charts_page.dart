@@ -1,3 +1,5 @@
+/// Monthly and custom chart dashboard.
+/// Combines fuel, lunch, income, insurance, car, and budget values for chart displays.
 part of '../app.dart';
 
 /// Shows all-time and current-month spending against an editable monthly budget.
@@ -450,20 +452,22 @@ class _ChartsPageState extends State<ChartsPage>
           key: const ValueKey('reveal-charts-comparison'),
           index: 2,
           child: _MonthlyTravelComparisonChart(
-          title:
-              '${_monthFmt.format(now)} vs ${_monthFmt.format(previousMonth)}',
-          currentTotal: currentTravelExpense + (widget._includeLunch ? currentLunch : 0),
-          previousTotal: previousTravelExpense + (widget._includeLunch ? previousLunch : 0),
-          currentLunch: widget._includeLunch ? currentLunch : null,
-          previousLunch: widget._includeLunch ? previousLunch : null,
-          grossIncome: income,
-          fuel: monthStats.spent,
-          insurance: insurance,
-          carPayment: carPayment,
-          previousFuel: previousMonthStats.spent,
-          previousInsurance: _previousInsurancePayment,
-          previousCarPayment: _previousCarPayment,
-          distance: monthStats.distance,
+            title:
+                '${_monthFmt.format(now)} vs ${_monthFmt.format(previousMonth)}',
+            currentTotal: currentTravelExpense +
+                (widget._includeLunch ? currentLunch : 0),
+            previousTotal: previousTravelExpense +
+                (widget._includeLunch ? previousLunch : 0),
+            currentLunch: widget._includeLunch ? currentLunch : null,
+            previousLunch: widget._includeLunch ? previousLunch : null,
+            grossIncome: income,
+            fuel: monthStats.spent,
+            insurance: insurance,
+            carPayment: carPayment,
+            previousFuel: previousMonthStats.spent,
+            previousInsurance: _previousInsurancePayment,
+            previousCarPayment: _previousCarPayment,
+            distance: monthStats.distance,
           ),
         ),
         const SizedBox(height: 12),
@@ -472,21 +476,23 @@ class _ChartsPageState extends State<ChartsPage>
           index: 3,
           child: _customChartError != null
               ? _CollapsibleChart(
-            title: 'Custom Chart',
-            child: Text('Could not load custom chart: $_customChartError'),
-          )
+                  title: 'Custom Chart',
+                  child:
+                      Text('Could not load custom chart: $_customChartError'),
+                )
               : _customChartPrefs == null || _customSelection == null
                   ? const _CollapsibleChart(
-            title: 'Custom Chart',
-            child: Center(child: CircularProgressIndicator()),
-          )
+                      title: 'Custom Chart',
+                      child: Center(child: CircularProgressIndicator()),
+                    )
                   : _CustomComparisonChart(
-            selection: _customSelection!,
-            values: _CustomChartValues(widget.entries, _customChartPrefs!, now,
-                lunchSpent: widget._includeLunch ? currentLunch : 0),
-            onChanged: _changeCustomSelection,
-            lunchSpent: widget._includeLunch ? currentLunch : null,
-          ),
+                      selection: _customSelection!,
+                      values: _CustomChartValues(
+                          widget.entries, _customChartPrefs!, now,
+                          lunchSpent: widget._includeLunch ? currentLunch : 0),
+                      onChanged: _changeCustomSelection,
+                      lunchSpent: widget._includeLunch ? currentLunch : null,
+                    ),
         ),
         const SizedBox(height: 16),
         _PageReveal(
@@ -524,7 +530,8 @@ class _BudgetPieChart extends StatelessWidget {
     final goal = budget;
     final colors = Theme.of(context).colorScheme;
     final totalSpent = spent + (lunchSpent ?? 0);
-    final remaining = goal == null || totalSpent >= goal ? 0.0 : goal - totalSpent;
+    final remaining =
+        goal == null || totalSpent >= goal ? 0.0 : goal - totalSpent;
     final denominator = goal == null ? 1.0 : math.max(goal, totalSpent);
     final progress = goal == null ? 0.0 : spent / denominator;
     return _CollapsibleChart(
@@ -542,7 +549,8 @@ class _BudgetPieChart extends StatelessWidget {
           else
             _ChartSummary(
               progress: progress,
-              thirdProgress: lunchSpent == null ? null : lunchSpent! / denominator,
+              thirdProgress:
+                  lunchSpent == null ? null : lunchSpent! / denominator,
               semanticsLabel: lunchSpent == null
                   ? 'Spent and remaining budget'
                   : 'Fuel, remaining budget and lunch',
@@ -667,12 +675,16 @@ class _MonthlyTravelComparisonChart extends StatelessWidget {
               children: [
                 _BudgetLegendRow(
                   color: colors.primary,
-                  label: currentLunch == null ? 'Current month travel expenses' : 'Current month travel and lunch',
+                  label: currentLunch == null
+                      ? 'Current month travel expenses'
+                      : 'Current month travel and lunch',
                   amount: currentTotal,
                 ),
                 _BudgetLegendRow(
                   color: colors.surfaceContainerHighest,
-                  label: currentLunch == null ? 'Previous month travel expenses' : 'Previous month travel and lunch',
+                  label: currentLunch == null
+                      ? 'Previous month travel expenses'
+                      : 'Previous month travel and lunch',
                   amount: previousTotal,
                 ),
               ],
@@ -733,7 +745,9 @@ class _MonthlyTravelComparisonChart extends StatelessWidget {
           ),
           _BudgetLegendRow(
             color: colors.surfaceContainerHighest,
-            label: currentLunch == null ? 'Income after travel expenses' : 'Income after travel and lunch',
+            label: currentLunch == null
+                ? 'Income after travel expenses'
+                : 'Income after travel and lunch',
             amount: grossIncome - currentTotal,
           ),
         ],
@@ -835,15 +849,16 @@ class _CustomComparisonChart extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
-                        child: selector('First amount', selection.first, (value) {
+                        child:
+                            selector('First amount', selection.first, (value) {
                           onChanged(
                               _CustomChartSelection(value, selection.second));
                         }),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child:
-                            selector('Second amount', selection.second, (value) {
+                        child: selector('Second amount', selection.second,
+                            (value) {
                           onChanged(
                               _CustomChartSelection(selection.first, value));
                         }),
@@ -857,7 +872,9 @@ class _CustomComparisonChart extends StatelessWidget {
           const SizedBox(height: 12),
           _ChartSummary(
             progress: progress,
-            thirdProgress: progress == null || lunchSpent == null ? null : lunchSpent! / total,
+            thirdProgress: progress == null || lunchSpent == null
+                ? null
+                : lunchSpent! / total,
             emptyLabel: negative ? 'Negative amount' : 'No data',
             semanticsLabel:
                 '${selection.first.label} and ${selection.second.label}'
@@ -1141,5 +1158,6 @@ class _BudgetPiePainter extends CustomPainter {
       oldDelegate.thirdColor != thirdColor;
 }
 
-Color _lunchPieColor(ColorScheme colors) =>
-    colors.brightness == Brightness.dark ? Colors.deepOrange.shade300 : Colors.deepOrange.shade700;
+Color _lunchPieColor(ColorScheme colors) => colors.brightness == Brightness.dark
+    ? Colors.deepOrange.shade300
+    : Colors.deepOrange.shade700;

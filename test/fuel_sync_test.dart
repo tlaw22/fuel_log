@@ -192,9 +192,11 @@ void main() {
       (true, 'classic'),
       (true, 'forest'),
       (true, 'purpleRaindrops'),
+      (true, 'coastalBlues'),
       (false, 'classic'),
       (false, 'sage'),
       (false, 'rose'),
+      (false, 'summerSunset'),
     ]) {
       SharedPreferences.setMockInitialValues({
         'fuel_theme_is_dark_v1': isDark,
@@ -326,12 +328,12 @@ void main() {
     expect(scaledSize(), closeTo(30, 0.001));
     await tester.tap(find.byTooltip('Decrease font size'));
     await tester.pumpAndSettle();
-    expect(find.text('80%'), findsOneWidget);
-    expect(scaledSize(), closeTo(24, 0.001));
+    expect(find.text('90%'), findsOneWidget);
+    expect(scaledSize(), closeTo(27, 0.001));
     await tester.tap(find.byTooltip('Decrease font size'));
     await tester.pumpAndSettle();
-    expect(find.text('60%'), findsOneWidget);
-    expect(scaledSize(), closeTo(18, 0.001));
+    expect(find.text('80%'), findsOneWidget);
+    expect(scaledSize(), closeTo(24, 0.001));
     expect(
       tester.widget<IconButton>(find.ancestor(
         of: find.byTooltip('Decrease font size'),
@@ -339,12 +341,14 @@ void main() {
       )).onPressed,
       isNull,
     );
-    for (final value in ['80%', '100%', '120%']) {
+    for (var value = 90; value <= 200; value += 10) {
+      await tester.ensureVisible(find.byTooltip('Increase font size'));
       await tester.tap(find.byTooltip('Increase font size'));
       await tester.pumpAndSettle();
-      expect(find.text(value), findsOneWidget);
+      expect(find.text('$value%'), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: 'at $value%');
     }
-    expect(scaledSize(), closeTo(36, 0.001));
+    expect(scaledSize(), closeTo(60, 0.001));
     expect(
       tester.widget<IconButton>(find.ancestor(
         of: find.byTooltip('Increase font size'),
@@ -354,26 +358,27 @@ void main() {
     );
     tester.binding.platformDispatcher.textScaleFactorTestValue = 1.2;
     await tester.pumpAndSettle();
-    expect(scaledSize(), closeTo(28.8, 0.001));
+    expect(scaledSize(), closeTo(48, 0.001));
     final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getInt('fuel_font_size_percent_v1'), 120);
+    expect(prefs.getInt('fuel_font_size_percent_v1'), 200);
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(MediaQuery.textScalerOf(tester.element(find.byTooltip('Settings')))
-        .scale(20), closeTo(28.8, 0.001));
+        .scale(20), closeTo(48, 0.001));
     await tester.pumpWidget(const FuelLogApp(key: ValueKey('font-relaunch')));
     await _pumpStartupToCompletion(tester);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(find.text('120%'), findsOneWidget);
-    expect(scaledSize(), closeTo(28.8, 0.001));
+    await tester.ensureVisible(find.text('Font size'));
+    expect(find.text('200%'), findsOneWidget);
+    expect(scaledSize(), closeTo(48, 0.001));
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('invalid saved font size is reported and does not change theme',
       (tester) async {
     SharedPreferences.setMockInitialValues({
-      'fuel_font_size_percent_v1': 110,
+      'fuel_font_size_percent_v1': 115,
       'fuel_theme_is_dark_v1': false,
       'fuel_light_palette_v1': 'rose',
     });
@@ -392,6 +397,36 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('100%'), findsOneWidget);
     expect(find.text('Rose'), findsOneWidget);
+  });
+
+  testWidgets('legacy 60% font size loads at the new minimum', (tester) async {
+    SharedPreferences.setMockInitialValues({'fuel_font_size_percent_v1': 60});
+    await tester.pumpWidget(const FuelLogApp());
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('80%'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('maximum font size keeps narrow settings usable', (tester) async {
+    tester.view.physicalSize = const Size(320, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.binding.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.binding.platformDispatcher.clearTextScaleFactorTestValue);
+    SharedPreferences.setMockInitialValues({'fuel_font_size_percent_v1': 200});
+    await tester.pumpWidget(const FuelLogApp());
+    await _pumpStartupToCompletion(tester);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Decrease font size'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Decrease font size'));
+    await tester.pumpAndSettle();
+    expect(find.text('190%'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('large app text keeps narrow navigation and settings usable',
@@ -431,8 +466,10 @@ void main() {
     for (final (isDark, palette) in [
       (true, ThemePalette.forest),
       (true, ThemePalette.purpleRaindrops),
+      (true, ThemePalette.coastalBlues),
       (false, ThemePalette.sage),
       (false, ThemePalette.rose),
+      (false, ThemePalette.summerSunset),
     ]) {
       final theme = buildTheme(isDark: isDark, palette: palette);
       final scheme = theme.colorScheme;
@@ -453,6 +490,54 @@ void main() {
       expect(contrast(selectorAccent, scheme.surfaceContainerHighest),
           greaterThanOrEqualTo(3), reason: palette.name);
     }
+  });
+
+  testWidgets('new palettes can be selected and restored independently',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'fuel_bubbles_enabled_v1': false,
+    });
+    await tester.pumpWidget(const FuelLogApp());
+    await _pumpStartupToCompletion(tester);
+
+    Future<void> selectPalette(String name) async {
+      await tester.tap(find.byTooltip('Choose color palette'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.ancestor(
+        of: find.text(name),
+        matching: find.byType(CheckedPopupMenuItem<ThemePalette>),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    Color background() =>
+        tester.widget<MaterialApp>(find.byType(MaterialApp)).theme!
+            .scaffoldBackgroundColor;
+
+    await selectPalette('Coastal Blues');
+    expect(background(), const Color(0xFF012A4A));
+    await tester.tap(find.byTooltip('Switch to light theme'));
+    await tester.pumpAndSettle();
+    await selectPalette('Summer Sunset');
+    expect(background(), const Color(0xFFFBF8CC));
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('fuel_dark_palette_v1'), 'coastalBlues');
+    expect(prefs.getString('fuel_light_palette_v1'), 'summerSunset');
+
+    await tester.pumpWidget(const FuelLogApp(key: ValueKey('new-palettes')));
+    await _pumpStartupToCompletion(tester);
+    expect(background(), const Color(0xFFFBF8CC));
+    await tester.tap(find.byTooltip('Switch to dark theme'));
+    await tester.pumpAndSettle();
+    expect(background(), const Color(0xFF012A4A));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Coastal Blues'), findsOneWidget);
+    await tester.tap(find.text('Dark mode'));
+    await tester.pumpAndSettle();
+    expect(find.text('Summer Sunset'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('palette menu remembers separate light and dark selections',
@@ -1127,8 +1212,7 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Fill-up saved, but notification failed:'),
-        findsOneWidget);
+    expect(find.text('Notification update failed'), findsOneWidget);
     final prefs = await SharedPreferences.getInstance();
     expect(jsonDecode(prefs.getString('fuel_entries_v1')!) as List, hasLength(1));
   }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
@@ -1183,9 +1267,11 @@ void main() {
       (true, ThemePalette.classic),
       (true, ThemePalette.forest),
       (true, ThemePalette.purpleRaindrops),
+      (true, ThemePalette.coastalBlues),
       (false, ThemePalette.classic),
       (false, ThemePalette.sage),
       (false, ThemePalette.rose),
+      (false, ThemePalette.summerSunset),
     ]) {
       SharedPreferences.setMockInitialValues({});
       final theme = buildTheme(isDark: isDark, palette: palette);

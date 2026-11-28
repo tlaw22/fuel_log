@@ -1,3 +1,5 @@
+/// Pump-photo browser and storage utilities.
+/// Lists, opens, shares, captures, and deletes fuel-pump photos on supported platforms.
 part of '../app.dart';
 
 class _PumpPhoto {
@@ -52,7 +54,11 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
 
   Future<void> _refresh() async {
     if (_isAndroidOnlyPlatform) {
-      if (mounted) setState(() => _isLoading = false);
+      if (!kIsWeb) {
+        await _loadSavedFolder();
+      } else if (mounted) {
+        setState(() => _isLoading = false);
+      }
       return;
     }
 
@@ -142,19 +148,50 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
     return Directory(path).existsSync() ? path : null;
   }
 
-  bool _isImageFile(FileSystemEntity entity) {
-    if (entity is! File) return false;
-    return const {
-      '.bmp',
-      '.gif',
-      '.heic',
-      '.heif',
-      '.jpeg',
-      '.jpg',
-      '.png',
-      '.webp',
-    }.contains(
-        '.${entity.uri.pathSegments.last.split('.').last.toLowerCase()}');
+  static const _imageExtensions = {'jpg', 'jpeg', 'png'};
+
+  bool _hasImageExtension(String name) =>
+      _imageExtensions.contains(name.split('.').last.toLowerCase());
+
+  bool _isImageFile(FileSystemEntity entity) =>
+      entity is File && _hasImageExtension(entity.uri.pathSegments.last);
+
+  Future<List<XFile>> _imagesInFolder(String directory) async {
+    final entities = await Directory(directory)
+        .list(followLinks: false)
+        .where(_isImageFile)
+        .toList();
+    return entities.whereType<File>().map((file) => XFile(file.path)).toList();
+  }
+
+  void _setExternalPhotos(List<XFile> files) {
+    _externalPhotos = files.map(_ExternalPhoto.new).toList()
+      ..sort((first, second) => first.file.name.compareTo(second.file.name));
+    _isLoading = false;
+  }
+
+  Future<void> _loadSavedFolder() async {
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final folder = prefs.getString(_photoFolderPrefsKey);
+      final files = folder != null && Directory(folder).existsSync()
+          ? await _imagesInFolder(folder)
+          : <XFile>[];
+      if (!mounted) return;
+      setState(() => _setExternalPhotos(files));
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = 'Could not open pictures: $error';
+      });
+    }
   }
 
   Future<void> _chooseExternalPhotos() async {
@@ -165,49 +202,40 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
     try {
       late final List<XFile> files;
       if (kIsWeb) {
-        files = await openFiles(
-          acceptedTypeGroups: const [
-            XTypeGroup(
-              label: 'Image files',
-              extensions: [
-                'bmp',
-                'gif',
-                'heic',
-                'heif',
-                'jpeg',
-                'jpg',
-                'png',
-                'webp',
-              ],
-            ),
-          ],
-        );
+        final picked = await folder_picker.pickFolderImages();
+        if (picked == null) {
+          if (mounted) setState(() => _isLoading = false);
+          return;
+        }
+        files = [
+          for (final photo in picked)
+            XFile.fromData(photo.bytes, name: photo.name),
+        ];
       } else if (Platform.isIOS) {
-        files = await ImagePicker().pickMultiImage();
+        files = (await ImagePicker().pickMultiImage())
+            .where((file) => _hasImageExtension(file.name))
+            .toList();
       } else {
+        final prefs = await SharedPreferences.getInstance();
+        final saved = prefs.getString(_photoFolderPrefsKey);
         final directory = await getDirectoryPath(
-          initialDirectory: _defaultPicturesDirectory,
+          initialDirectory: saved != null && Directory(saved).existsSync()
+              ? saved
+              : _defaultPicturesDirectory,
           confirmButtonText: 'Open folder',
         );
         if (directory == null) {
           if (mounted) setState(() => _isLoading = false);
           return;
         }
-        final entities = await Directory(directory)
-            .list(followLinks: false)
-            .where(_isImageFile)
-            .toList();
-        files =
-            entities.whereType<File>().map((file) => XFile(file.path)).toList();
+        if (Platform.isWindows) {
+          await prefs.setString(_photoFolderPrefsKey, directory);
+        }
+        files = await _imagesInFolder(directory);
       }
 
       if (!mounted) return;
-      setState(() {
-        _externalPhotos = files.map(_ExternalPhoto.new).toList()
-          ..sort(
-              (first, second) => first.file.name.compareTo(second.file.name));
-        _isLoading = false;
-      });
+      setState(() => _setExternalPhotos(files));
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -270,7 +298,14 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
                     if (!snapshot.hasData) {
                       return const Center(child: CircularProgressIndicator());
                     }
-                    return Image.memory(snapshot.data!, fit: BoxFit.cover);
+                    return Image.memory(
+                      snapshot.data!,
+                      fit: BoxFit.cover,
+                      cacheWidth: 400,
+                      frameBuilder: (context, child, frame, _) => frame == null
+                          ? const Center(child: CircularProgressIndicator())
+                          : child,
+                    );
                   },
                 ),
               ),
@@ -430,7 +465,6 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
   }
 
   Widget _buildGallery() {
-    if (_isAndroidOnlyPlatform) return _buildAndroidOnlyFeature();
     if (!_isAndroid) return _buildExternalGallery();
     return Column(
       children: [
@@ -438,22 +472,22 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
           key: const ValueKey('reveal-photos-header'),
           index: 0,
           child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Pump Photos',
-                  style: Theme.of(context).textTheme.titleMedium,
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Pump Photos',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
-              ),
-              IconButton(
-                tooltip: 'Refresh photos',
-                onPressed: _isLoading ? null : _refresh,
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
+                IconButton(
+                  tooltip: 'Refresh photos',
+                  onPressed: _isLoading ? null : _refresh,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
           ),
         ),
         Expanded(
@@ -461,124 +495,94 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
             key: const ValueKey('reveal-photos-gallery'),
             index: 1,
             child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(_error!, textAlign: TextAlign.center),
-                            const SizedBox(height: 12),
-                            FilledButton(
-                              onPressed: _refresh,
-                              child: const Text('Try again'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  : _photos.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'No pump photos saved in Documents/fuel-logs yet.',
-                            textAlign: TextAlign.center,
-                          ),
-                        )
-                      : LayoutBuilder(
-                          builder: (context, constraints) {
-                            final columns = constraints.maxWidth >= 700
-                                ? 4
-                                : constraints.maxWidth >= 450
-                                    ? 3
-                                    : 2;
-                            return GridView.builder(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 96),
-                              gridDelegate:
-                                  SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: columns,
-                                crossAxisSpacing: 8,
-                                mainAxisSpacing: 8,
-                                childAspectRatio: 0.9,
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(_error!, textAlign: TextAlign.center),
+                              const SizedBox(height: 12),
+                              FilledButton(
+                                onPressed: _refresh,
+                                child: const Text('Try again'),
                               ),
-                              itemCount: _photos.length,
-                              itemBuilder: (context, index) =>
-                                  _buildPhotoTile(_photos[index]),
-                            );
-                          },
+                            ],
+                          ),
                         ),
+                      )
+                    : _photos.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No pump photos saved in Documents/fuel-logs yet.',
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
+                              final columns = constraints.maxWidth >= 700
+                                  ? 4
+                                  : constraints.maxWidth >= 450
+                                      ? 3
+                                      : 2;
+                              return GridView.builder(
+                                padding:
+                                    const EdgeInsets.fromLTRB(12, 0, 12, 96),
+                                gridDelegate:
+                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: columns,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                  childAspectRatio: 0.9,
+                                ),
+                                itemCount: _photos.length,
+                                itemBuilder: (context, index) =>
+                                    _buildPhotoTile(_photos[index]),
+                              );
+                            },
+                          ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildAndroidOnlyFeature() => Column(
-        children: [
-          _PageReveal(
-            key: const ValueKey('reveal-photos-header'),
-            index: 0,
-            child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Pump Photos',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            ),
-          ),
-          const Expanded(
-            child: _PageReveal(
-              key: ValueKey('reveal-photos-gallery'),
-              index: 1,
-              child: Center(
-                child: FilledButton.tonal(
-                  onPressed: null,
-                  child: Text('Android Only Feature'),
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-
   Widget _buildExternalGallery() {
     final pickerLabel = kIsWeb
-        ? 'Select Pictures'
+        ? 'Choose Photo Folder'
         : Platform.isIOS
             ? 'Choose Photos'
-            : 'Open Pictures Folder';
+            : 'Choose Photo Folder';
     final emptyMessage = kIsWeb
-        ? 'Select pictures from your device to view them here.'
+        ? 'Choose a folder to show its jpg, jpeg and png photos.'
         : Platform.isIOS
             ? 'Choose photos from your library to view them here.'
-            : 'Choose the Pictures folder to browse its images.';
+            : 'Choose a folder to show its jpg, jpeg and png photos.';
     return Column(
       children: [
         _PageReveal(
           key: const ValueKey('reveal-photos-header'),
           index: 0,
           child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Pictures',
-                  style: Theme.of(context).textTheme.titleMedium,
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Pictures',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: _isLoading ? null : _chooseExternalPhotos,
-                icon: const Icon(
-                    kIsWeb ? Icons.image_search_outlined : Icons.folder_open),
-                label: Text(pickerLabel),
-              ),
-            ],
-          ),
+                FilledButton.tonalIcon(
+                  onPressed: _isLoading ? null : _chooseExternalPhotos,
+                  icon: const Icon(
+                      kIsWeb ? Icons.image_search_outlined : Icons.folder_open),
+                  label: Text(pickerLabel),
+                ),
+              ],
+            ),
           ),
         ),
         Expanded(
@@ -586,47 +590,48 @@ class _PumpPhotosPageState extends State<PumpPhotosPage> {
             key: const ValueKey('reveal-photos-gallery'),
             index: 1,
             child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(_error!, textAlign: TextAlign.center),
-                      ),
-                    )
-                  : _externalPhotos.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Text(
-                              emptyMessage,
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        )
-                      : LayoutBuilder(
-                          builder: (context, constraints) {
-                            final columns = constraints.maxWidth >= 700
-                                ? 4
-                                : constraints.maxWidth >= 450
-                                    ? 3
-                                    : 2;
-                            return GridView.builder(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 96),
-                              gridDelegate:
-                                  SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: columns,
-                                crossAxisSpacing: 8,
-                                mainAxisSpacing: 8,
-                                childAspectRatio: 0.9,
-                              ),
-                              itemCount: _externalPhotos.length,
-                              itemBuilder: (context, index) =>
-                                  _buildExternalPhotoTile(
-                                      _externalPhotos[index]),
-                            );
-                          },
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(_error!, textAlign: TextAlign.center),
                         ),
+                      )
+                    : _externalPhotos.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                emptyMessage,
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          )
+                        : LayoutBuilder(
+                            builder: (context, constraints) {
+                              final columns = constraints.maxWidth >= 700
+                                  ? 4
+                                  : constraints.maxWidth >= 450
+                                      ? 3
+                                      : 2;
+                              return GridView.builder(
+                                padding:
+                                    const EdgeInsets.fromLTRB(12, 0, 12, 96),
+                                gridDelegate:
+                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: columns,
+                                  crossAxisSpacing: 8,
+                                  mainAxisSpacing: 8,
+                                  childAspectRatio: 0.9,
+                                ),
+                                itemCount: _externalPhotos.length,
+                                itemBuilder: (context, index) =>
+                                    _buildExternalPhotoTile(
+                                        _externalPhotos[index]),
+                              );
+                            },
+                          ),
           ),
         ),
       ],

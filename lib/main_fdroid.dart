@@ -1,3 +1,5 @@
+// Application entry point for the F-Droid build.
+// Starts FuelLog with Bluetooth sharing disabled to avoid unavailable dependencies.
 import 'package:flutter/material.dart';
 
 import 'app.dart';

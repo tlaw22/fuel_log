@@ -1,3 +1,5 @@
+/// Platform download and installation links.
+/// Opens the FuelLog release pages for supported desktop and mobile platforms.
 part of '../app.dart';
 
 class _DownloadPlatforms extends StatelessWidget {

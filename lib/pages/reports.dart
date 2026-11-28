@@ -1,3 +1,5 @@
+/// Fuel-log report generation and sharing page.
+/// Builds monthly summaries and fill-up details, then exports or shares the report.
 part of '../app.dart';
 
 const String _savedReportsPreferencesKey = 'fuel_reports_v1';

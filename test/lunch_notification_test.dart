@@ -206,7 +206,10 @@ void main() {
     await _fillLunch(tester, '5');
     await tester.tap(find.text('Save lunch'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Lunch saved, but notification failed:'),
+    expect(
+        defaultTargetPlatform == TargetPlatform.windows
+            ? find.text('Notification update failed')
+            : find.textContaining('Lunch saved, but notification failed:'),
         findsOneWidget);
     final prefs = await SharedPreferences.getInstance();
     expect(jsonDecode(prefs.getString('lunch_entries_v1')!) as List, hasLength(1));

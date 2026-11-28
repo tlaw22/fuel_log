@@ -1,3 +1,5 @@
+// Application shell and core data model for FuelLog.
+// Defines startup configuration, themes, units, fuel and sync models, and shared formatting.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -14,12 +16,17 @@ import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart' hide XFile;
 import 'package:url_launcher/url_launcher.dart';
+import 'widgets/folder_picker_stub.dart'
+    if (dart.library.js_interop) 'widgets/folder_picker_web.dart'
+    as folder_picker;
 import 'widgets/notify_web_stub.dart'
-    if (dart.library.js_interop) 'widgets/notify_web.dart' as browser_notifications;
+    if (dart.library.js_interop) 'widgets/notify_web.dart'
+    as browser_notifications;
 
 part 'pages/home_page.dart';
 part 'pages/settings_page.dart';
@@ -44,6 +51,8 @@ const MethodChannel fuelLogNativeChannel =
     MethodChannel('io.github.tlaw22.fuellog/native');
 const MethodChannel _androidNativeChannel = fuelLogNativeChannel;
 const String _monthlyBudgetPrefsKeyPrefix = 'fuel_monthly_budget_';
+const String _photoFolderPrefsKey = 'photo_folder';
+const String _launchCountPrefsKey = 'app_launch_count';
 const Duration kAppSnackBarDuration = Duration(seconds: 10);
 
 String _monthlyValueKey(String name, DateTime month) =>
@@ -80,10 +89,22 @@ class FuelLogApp extends StatefulWidget {
 }
 
 class _FuelLogAppState extends State<FuelLogApp> with _ThemeSettings {
+  int? _launchCount;
+
   @override
   void initState() {
     super.initState();
     _loadThemePreferences();
+    _recordLaunch();
+  }
+
+  Future<void> _recordLaunch() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final count = (prefs.getInt(_launchCountPrefsKey) ?? 0) + 1;
+      await prefs.setInt(_launchCountPrefsKey, count);
+      if (mounted) setState(() => _launchCount = count);
+    } catch (_) {}
   }
 
   /// Builds the root Material application.
@@ -116,6 +137,7 @@ class _FuelLogAppState extends State<FuelLogApp> with _ThemeSettings {
           selectedPalette: () => _currentPalette,
           fontSizePercent: () => _fontSizePercent,
           bubblesEnabled: () => _bubblesEnabled,
+          launchCount: () => _launchCount,
           onToggleTheme: _toggleTheme,
           onSelectPalette: _selectPalette,
           onSetFontSize: _setFontSize,
@@ -268,9 +290,11 @@ SyncSnapshot mergeSnapshots(SyncSnapshot local, SyncSnapshot remote) {
             if (a.updatedAt != b.updatedAt) {
               return a.updatedAt.isAfter(b.updatedAt) ? a : b;
             }
-            return jsonEncode(a.toJson()).compareTo(jsonEncode(b.toJson())) >= 0
-                ? a
-                : b;
+            final aTieBreaker =
+                '${a.date.microsecondsSinceEpoch}|${a.odometer}|${a.price}|${a.volume}';
+            final bTieBreaker =
+                '${b.date.microsecondsSinceEpoch}|${b.odometer}|${b.price}|${b.volume}';
+            return aTieBreaker.compareTo(bTieBreaker) >= 0 ? a : b;
           });
     final newestDeletion = deletionCandidates.isEmpty
         ? null

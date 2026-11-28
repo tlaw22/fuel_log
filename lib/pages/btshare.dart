@@ -1,3 +1,5 @@
+// Android Bluetooth data-sharing page.
+// Lists paired devices and sends or receives complete FuelLog snapshots.
 import 'dart:async';
 import 'dart:convert';
 

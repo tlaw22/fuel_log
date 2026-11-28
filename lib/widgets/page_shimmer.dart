@@ -1,3 +1,5 @@
+/// Page transition and loading reveal animations.
+/// Staggers reveal effects and provides the FuelLog page shimmer presentation.
 part of '../app.dart';
 
 class _StaggeredPage extends StatefulWidget {
@@ -121,7 +123,8 @@ class _PageReveal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scope = context.dependOnInheritedWidgetOfExactType<_PageRevealScope>();
+    final scope =
+        context.dependOnInheritedWidgetOfExactType<_PageRevealScope>();
     if (scope == null) return child;
     final visible = scope.complete || index < scope.revealed;
     final colors = Theme.of(context).colorScheme;
@@ -149,7 +152,8 @@ class _PageReveal extends StatelessWidget {
                         colors.surfaceContainerHighest,
                       ),
                       scope.shimmer.value,
-                    )!.withValues(alpha: 0.55),
+                    )!
+                        .withValues(alpha: 0.55),
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),

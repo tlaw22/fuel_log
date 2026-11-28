@@ -7,6 +7,8 @@ import 'package:fuel_log/app.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'restaurant_test_storage.dart';
+
 Map<String, dynamic> fuel(String id, DateTime date, double price) => {
       'id': id,
       'date': date.toIso8601String(),
@@ -28,11 +30,24 @@ Future<void> start(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> navigate(WidgetTester tester, String page) async {
-  await tester.tap(find.byWidgetPredicate(
+Future<void> navigate(WidgetTester tester, String page,
+    {bool waitForFile = false}) async {
+  final destination = find.byWidgetPredicate(
     (widget) => widget is Semantics && widget.properties.label == '$page page',
-  ));
-  await tester.pumpAndSettle();
+  );
+  if (waitForFile) {
+    await waitForRestaurantIo(
+      tester,
+      () => find.text('Lunch budget').evaluate().isNotEmpty,
+      start: () async {
+        await tester.tap(destination);
+        await tester.pump(const Duration(seconds: 1));
+      },
+    );
+  } else {
+    await tester.tap(destination);
+    await tester.pumpAndSettle();
+  }
 }
 
 Future<void> reachControl(WidgetTester tester, String page) async {
@@ -261,6 +276,7 @@ void main() {
 
   testWidgets('lunch-only totals work and new lunch updates them immediately',
       (tester) async {
+    useRestaurantTestDirectory();
     tester.view.physicalSize = const Size(800, 2000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -277,19 +293,26 @@ void main() {
     await tester.enterText(restaurant, 'Cafe');
     await tester.enterText(
         find.byKey(const ValueKey('lunch-price-input')), '12');
-    await tester.tap(find.text('Save lunch'));
-    await tester.pumpAndSettle();
+    await waitForRestaurantIo(
+      tester,
+      () => find.text('New lunch').evaluate().isEmpty,
+      start: () => tester.tap(find.text('Save lunch')),
+    );
     expect(find.text('This month\n\$12.00'), findsOneWidget);
     await navigate(tester, 'Totals');
     expect(find.text('No fill-ups yet'), findsNothing);
     expect(find.text('Lunch spent'), findsWidgets);
     expect(find.text('\$12.00'), findsWidgets);
     expect(find.text('0.0 gal'), findsWidgets);
-    await navigate(tester, 'Lunch');
+    await navigate(tester, 'Lunch', waitForFile: true);
     final now = DateTime.now();
     final monday = DateTime(now.year, now.month, now.day - now.weekday + 1);
+    await tester.dragFrom(
+        tester.getCenter(find.text('Lunch budget')), const Offset(0, -250));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Week of ${DateFormat.yMMMd().format(monday)}'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text(DateFormat.yMMMd().format(now)));
     await tester.tap(find.text(DateFormat.yMMMd().format(now)));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Delete lunch entry'));

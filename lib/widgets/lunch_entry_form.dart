@@ -1,3 +1,5 @@
+/// Lunch add and edit form.
+/// Offers restaurant search, date/time selection, custom prices, and recurring lunch saving.
 part of '../app.dart';
 
 class _LunchEntryForm extends StatefulWidget {
@@ -51,8 +53,8 @@ class _LunchEntryFormState extends State<_LunchEntryForm> {
       initialTime: TimeOfDay.fromDateTime(_date),
     );
     if (selected != null && mounted) {
-      setState(() => _date = DateTime(_date.year, _date.month, _date.day,
-          selected.hour, selected.minute));
+      setState(() => _date = DateTime(
+          _date.year, _date.month, _date.day, selected.hour, selected.minute));
     }
   }
 
@@ -109,7 +111,8 @@ class _LunchEntryFormState extends State<_LunchEntryForm> {
                   suffixIcon: Icon(Icons.search),
                 ),
                 onTap: () => setState(() => _showSuggestions = true),
-                onChanged: (_) => setState(() => _showSuggestions = !_otherSelected),
+                onChanged: (_) =>
+                    setState(() => _showSuggestions = !_otherSelected),
                 validator: (value) {
                   final name = value?.trim() ?? '';
                   if (name.isEmpty) return 'Enter a restaurant';
@@ -151,8 +154,10 @@ class _LunchEntryFormState extends State<_LunchEntryForm> {
               TextFormField(
                 key: const ValueKey('lunch-price-input'),
                 controller: _price,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'Price', prefixText: kCurrency),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                    labelText: 'Price', prefixText: kCurrency),
                 validator: _validateLunchAmount,
               ),
               Wrap(
@@ -172,7 +177,8 @@ class _LunchEntryFormState extends State<_LunchEntryForm> {
               ),
               if (_error != null)
                 Text('Could not save lunch: $_error',
-                    style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error)),
               FilledButton(
                 onPressed: _saving ? null : _save,
                 child: const Text('Save lunch'),

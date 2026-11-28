@@ -1,3 +1,5 @@
+/// Cross-platform notification service.
+/// Builds chart notification payloads and posts or cancels them on Android, Windows, and web.
 part of '../app.dart';
 
 /// Posts and cancels custom-chart notifications.
@@ -19,8 +21,8 @@ class FuelLogNotifications {
   }
 
   /// Posts a custom-chart notification.
-  static Future<void> showCustomChart(
-      List<FuelEntry> entries, FuelEntry savedEntry, String enteredAmount) async {
+  static Future<void> showCustomChart(List<FuelEntry> entries,
+      FuelEntry savedEntry, String enteredAmount) async {
     final now = DateTime.now();
     final prefs = await SharedPreferences.getInstance();
     final selection = await _CustomChartSelection.load(prefs);
@@ -59,11 +61,16 @@ class FuelLogNotifications {
     }
   }
 
-  /// Reports a notification failure after a fill-up is saved.
-  static void reportFailure(BuildContext context, Object error) {
+  /// Reports a notification failure after an entry is saved.
+  static void reportFailure(BuildContext context, Object error,
+      {bool lunch = false}) {
+    final concise = kIsWeb || defaultTargetPlatform == TargetPlatform.windows;
+    if (concise) debugPrint('Notification update failed: $error');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Fill-up saved, but notification failed: $error'),
+        content: Text(concise
+            ? 'Notification update failed'
+            : '${lunch ? 'Lunch' : 'Fill-up'} saved, but notification failed: $error'),
         duration: kAppSnackBarDuration,
       ),
     );

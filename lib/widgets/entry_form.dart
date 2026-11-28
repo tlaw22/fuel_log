@@ -1,3 +1,5 @@
+/// Fuel fill-up add and edit form.
+/// Validates purchase data, captures pump photos, saves entries, and provides delete actions.
 part of '../app.dart';
 
 // ======================= Entry form =======================

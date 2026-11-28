@@ -1,3 +1,5 @@
+// Browser notification implementation.
+// Requests permission and sends notification data to the JavaScript notification worker.
 import 'dart:convert';
 import 'dart:js_interop';
 

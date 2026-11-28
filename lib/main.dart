@@ -1,3 +1,5 @@
+// Application entry point for the standard build.
+// Starts FuelLog with the native Bluetooth sharing page enabled.
 import 'package:flutter/material.dart';
 
 import 'app.dart';

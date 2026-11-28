@@ -1,10 +1,14 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fuel_log/app.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'restaurant_test_storage.dart';
 
 void main() {
   setUp(() {
@@ -23,16 +27,29 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> openHomeLunch(WidgetTester tester) async {
+  Future<void> openHomeLunch(WidgetTester tester,
+      {bool waitForFile = false}) async {
     await tester.pumpWidget(const MaterialApp(home: HomePage()));
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     expect(find.text('Fill-up'), findsOneWidget);
-    await tester.tap(find.byWidgetPredicate(
+    final lunch = find.byWidgetPredicate(
       (widget) =>
           widget is Semantics && widget.properties.label == 'Lunch page',
-    ));
-    await tester.pumpAndSettle();
+    );
+    if (waitForFile) {
+      await waitForRestaurantIo(
+        tester,
+        () => find.text('Lunch budget').evaluate().isNotEmpty,
+        start: () async {
+          await tester.tap(lunch);
+          await tester.pump(const Duration(seconds: 1));
+        },
+      );
+    } else {
+      await tester.tap(lunch);
+      await tester.pumpAndSettle();
+    }
   }
 
   testWidgets('lunch help button shows the travel explanation', (tester) async {
@@ -66,6 +83,7 @@ void main() {
 
   testWidgets('restaurant search, custom entry and recurring budget persist',
       (tester) async {
+    final directory = useRestaurantTestDirectory();
     tester.view.physicalSize = const Size(800, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -105,8 +123,11 @@ void main() {
     await tester.enterText(restaurant, 'Local Cafe');
     await tester.enterText(
         find.byKey(const ValueKey('lunch-price-input')), '6');
-    await tester.tap(find.text('Save lunch'));
-    await tester.pumpAndSettle();
+    await waitForRestaurantIo(
+      tester,
+      () => find.text('New lunch').evaluate().isEmpty,
+      start: () => tester.tap(find.text('Save lunch')),
+    );
     expect(find.textContaining('Remaining: \$4.50'), findsOneWidget);
 
     final prefs = await SharedPreferences.getInstance();
@@ -114,11 +135,313 @@ void main() {
     expect(entries.map((entry) => entry['restaurant']),
         ['Taco Bell', 'Local Cafe']);
     expect(prefs.getDouble('lunch_daily_budget_v1'), 15);
+    final file = File('${directory.path}${Platform.pathSeparator}FuelLog'
+        '${Platform.pathSeparator}lunch_restaurants.csv');
+    expect(file.readAsStringSync(), endsWith('\r\nLocal Cafe'));
+    file.writeAsStringSync('\r\n"Edited, Cafe"', mode: FileMode.append);
     await tester.pumpWidget(const SizedBox());
-    await openHomeLunch(tester);
+    await openHomeLunch(tester, waitForFile: true);
     expect(find.textContaining('Remaining: \$4.50'), findsOneWidget);
     expect(find.text('\$10.50'), findsWidgets);
+    await tester.tap(find.text('Add lunch'));
+    await tester.pumpAndSettle();
+    await tester.enterText(restaurant, 'cafe');
+    await tester.pumpAndSettle();
+    expect(find.text('Local Cafe'), findsOneWidget);
+    expect(find.text('Edited, Cafe'), findsOneWidget);
+    await tester.tap(find.text('Other restaurant'));
+    await tester.enterText(restaurant, 'local cafe');
+    await tester.enterText(
+        find.byKey(const ValueKey('lunch-price-input')), '1');
+    await tester.tap(find.text('Save lunch'));
+    await tester.pumpAndSettle();
+    expect(file.readAsStringSync(), endsWith('\r\nLocal Cafe\r\n"Edited, Cafe"'));
+    file.writeAsStringSync('\r\nExternal Cafe', mode: FileMode.append);
+    await tester.tap(find.text('Add lunch'));
+    await tester.pumpAndSettle();
+    await tester.tap(restaurant);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Other restaurant'));
+    await tester.enterText(restaurant, 'Another Cafe');
+    await tester.enterText(
+        find.byKey(const ValueKey('lunch-price-input')), '1');
+    await waitForRestaurantIo(
+      tester,
+      () => find.text('New lunch').evaluate().isEmpty,
+      start: () => tester.tap(find.text('Save lunch')),
+    );
+    expect(file.readAsStringSync(),
+        endsWith('\r\nExternal Cafe\r\nAnother Cafe'));
   });
+
+  testWidgets('lunch CSV export and replacement are separate from fuel',
+      (tester) async {
+    final directory = useRestaurantTestDirectory();
+    tester.view.physicalSize = const Size(1000, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final separator = Platform.pathSeparator;
+    final output = File('${directory.path}${separator}lunch_export.csv');
+    final input = File('${directory.path}${separator}lunch_import.csv');
+    final fuelCsv = File('${directory.path}${separator}fuel.csv');
+    input.writeAsStringSync(
+      'Date,Restaurant,Price\r\n'
+      '2026-03-04T15:22:05.000,"Cafe, ""Sun""",0\r\n',
+    );
+    fuelCsv.writeAsStringSync(
+        'Date,Odometer (mi),Price per gal,Amount (gal)\n2026-01-01,10,2,3');
+    File selected = input;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const channel = MethodChannel('plugins.flutter.io/file_selector');
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'openFile') return [selected.path];
+      if (call.method == 'getSavePath') return output.path;
+      throw PlatformException(code: 'unexpected_method', message: call.method);
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    const fuel = '[{"unchanged":true}]';
+    SharedPreferences.setMockInitialValues({
+      'fuel_entries_v1': fuel,
+      'lunch_entries_v1': jsonEncode([
+        {
+          'restaurant': 'Old, "Place"',
+          'date': '2025-12-31T23:59:30.000',
+          'price': 12.5,
+        },
+      ]),
+    });
+    await openLunch(tester);
+
+    Future<void> tapAction(String label) async {
+      await tester.ensureVisible(find.text(label));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+    }
+
+    await waitForRestaurantIo(
+      tester,
+      () => find.textContaining('CSV saved to').evaluate().isNotEmpty,
+      start: () => tapAction('Export lunch CSV'),
+    );
+    expect(output.readAsStringSync(),
+        'Date,Restaurant,Price\r\n2025-12-31T23:59:30.000,"Old, ""Place""",12.5');
+
+    Future<void> openImport() => waitForRestaurantIo(
+          tester,
+          () => find.text('Replace').evaluate().isNotEmpty,
+          start: () => tapAction('Import lunch CSV'),
+        );
+    await openImport();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    final prefs = await SharedPreferences.getInstance();
+    expect((jsonDecode(prefs.getString('lunch_entries_v1')!) as List).single['restaurant'],
+        'Old, "Place"');
+
+    await openImport();
+    await waitForRestaurantIo(
+      tester,
+      () => (jsonDecode(prefs.getString('lunch_entries_v1')!) as List)
+          .single['restaurant'] == 'Cafe, "Sun"',
+      start: () => tester.tap(find.text('Replace')),
+    );
+    final imported = (jsonDecode(prefs.getString('lunch_entries_v1')!) as List).single;
+    expect(imported['restaurant'], 'Cafe, "Sun"');
+    expect(imported['date'], '2026-03-04T15:22:05.000');
+    expect(imported['price'], 0);
+    expect(prefs.getString('fuel_entries_v1'), fuel);
+
+    selected = fuelCsv;
+    await waitForRestaurantIo(
+      tester,
+      () => find.textContaining('Could not import CSV').evaluate().isNotEmpty,
+      start: () => tapAction('Import lunch CSV'),
+    );
+    expect((jsonDecode(prefs.getString('lunch_entries_v1')!) as List).single['restaurant'],
+        'Cafe, "Sun"');
+    fuelCsv.writeAsStringSync(
+        'Date,Restaurant,Price\r\n2026-03-04T15:22:05.000,Cafe,-1');
+    await waitForRestaurantIo(
+      tester,
+      () => find.textContaining('Invalid lunch CSV row 2').evaluate().isNotEmpty,
+      start: () => tapAction('Import lunch CSV'),
+    );
+    expect((jsonDecode(prefs.getString('lunch_entries_v1')!) as List).single['restaurant'],
+        'Cafe, "Sun"');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('restaurant CSV import and export preserve editable names',
+      (tester) async {
+    final directory = useRestaurantTestDirectory();
+    tester.view.physicalSize = const Size(1000, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final separator = Platform.pathSeparator;
+    final input = File('${directory.path}${separator}restaurants_in.csv')
+      ..writeAsStringSync('Chain\r\n"New, Cafe"\r\nNEW, CAFE\r\n');
+    final output = File('${directory.path}${separator}restaurants_out.csv');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const channel = MethodChannel('plugins.flutter.io/file_selector');
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'openFile') return [input.path];
+      if (call.method == 'getSavePath') return output.path;
+      throw PlatformException(code: 'unexpected_method', message: call.method);
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    SharedPreferences.setMockInitialValues({});
+    await openLunch(tester);
+
+    Future<void> tapAction(String label) async {
+      await tester.ensureVisible(find.text(label));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+    }
+
+    await waitForRestaurantIo(
+      tester,
+      () => find.textContaining('Could not import CSV').evaluate().isNotEmpty,
+      start: () => tapAction('Import restaurants CSV'),
+    );
+    input.writeAsStringSync('Chain\r\n"New, Cafe"\r\n"NEW, CAFE"\r\n');
+    await waitForRestaurantIo(
+      tester,
+      () => find.text('Replace').evaluate().isNotEmpty,
+      start: () => tapAction('Import restaurants CSV'),
+    );
+    final prefs = await SharedPreferences.getInstance();
+    await waitForRestaurantIo(
+      tester,
+      () => prefs.getBool('lunch_restaurants_file_v1') == true,
+      start: () => tester.tap(find.text('Replace')),
+    );
+    final file = File('${directory.path}${separator}FuelLog'
+        '${separator}lunch_restaurants.csv');
+    expect(file.readAsStringSync(), 'Chain\r\n"New, Cafe"');
+    await waitForRestaurantIo(
+      tester,
+      () => find.textContaining('CSV saved to').evaluate().isNotEmpty,
+      start: () => tapAction('Export restaurants CSV'),
+    );
+    expect(output.readAsStringSync(), 'Chain\r\n"New, Cafe"');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('Android lunch CSV export uses the native documents service',
+      (tester) async {
+    tester.view.physicalSize = const Size(1000, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    Map<dynamic, dynamic>? saved;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(fuelLogNativeChannel, (call) async {
+      if (call.method == 'androidSdkInt') return 33;
+      if (call.method == 'saveCsv') {
+        saved = call.arguments as Map<dynamic, dynamic>;
+        return 'Documents/lunch.csv';
+      }
+      throw PlatformException(code: 'unexpected_method', message: call.method);
+    });
+    addTearDown(
+        () => messenger.setMockMethodCallHandler(fuelLogNativeChannel, null));
+    SharedPreferences.setMockInitialValues({
+      'lunch_entries_v1': jsonEncode([
+        {
+          'restaurant': 'Cafe',
+          'date': '2026-03-04T15:22:05.000',
+          'price': 9.5,
+        },
+      ]),
+    });
+    await openLunch(tester);
+    await tester.ensureVisible(find.text('Export lunch CSV'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Export lunch CSV'));
+    await tester.pumpAndSettle();
+    expect(saved?['name'], startsWith('lunch_log_'));
+    expect(utf8.decode(saved!['bytes'] as List<int>),
+        'Date,Restaurant,Price\r\n2026-03-04T15:22:05.000,Cafe,9.5');
+    expect(find.text('CSV saved to Documents/lunch.csv'), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  testWidgets('a damaged restaurant CSV can be repaired by importing a list',
+      (tester) async {
+    final directory = useRestaurantTestDirectory();
+    final separator = Platform.pathSeparator;
+    final folder = Directory('${directory.path}${separator}FuelLog')
+      ..createSync();
+    final file = File('${folder.path}${separator}lunch_restaurants.csv')
+      ..writeAsStringSync('invalid header');
+    final replacement = File('${directory.path}${separator}replacement.csv')
+      ..writeAsStringSync('Chain\r\nRestored Cafe');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const channel = MethodChannel('plugins.flutter.io/file_selector');
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'openFile') return [replacement.path];
+      throw PlatformException(code: 'unexpected_method', message: call.method);
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    SharedPreferences.setMockInitialValues({
+      'lunch_restaurants_file_v1': true,
+    });
+    await waitForRestaurantIo(
+      tester,
+      () => find.textContaining('Could not load lunch data:').evaluate().isNotEmpty,
+      start: () => tester.pumpWidget(
+          const MaterialApp(home: Scaffold(body: LunchPage()))),
+    );
+    await waitForRestaurantIo(
+      tester,
+      () => find.text('Replace').evaluate().isNotEmpty,
+      start: () => tester.tap(find.text('Import restaurants CSV')),
+    );
+    await waitForRestaurantIo(
+      tester,
+      () => find.text('Lunch budget').evaluate().isNotEmpty,
+      start: () => tester.tap(find.text('Replace')),
+    );
+    expect(file.readAsStringSync(), 'Chain\r\nRestored Cafe');
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('wiping data removes the managed restaurant CSV', (tester) async {
+    final directory = useRestaurantTestDirectory();
+    final folder = Directory('${directory.path}${Platform.pathSeparator}FuelLog')
+      ..createSync();
+    final file = File('${folder.path}${Platform.pathSeparator}lunch_restaurants.csv')
+      ..writeAsStringSync('Chain\r\nCafe');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(
+        const MethodChannel('io.github.tlaw22.fuellog/windows_notification'),
+        (call) async => null);
+    addTearDown(() => messenger.setMockMethodCallHandler(
+        const MethodChannel('io.github.tlaw22.fuellog/windows_notification'),
+        null));
+    SharedPreferences.setMockInitialValues({
+      'lunch_restaurants_file_v1': true,
+      'lunch_restaurants_csv_v1': 'Chain\r\nCafe',
+    });
+    await tester.pumpWidget(const MaterialApp(home: HomePage()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Wipe Data'));
+    await tester.pumpAndSettle();
+    await waitForRestaurantIo(
+      tester,
+      () => find.text('App data wiped.').evaluate().isNotEmpty,
+      start: () => tester.tap(find.text('Wipe data')),
+    );
+    final prefs = await SharedPreferences.getInstance();
+    expect(file.existsSync(), isFalse);
+    expect(prefs.containsKey('lunch_restaurants_file_v1'), isFalse);
+    expect(prefs.containsKey('lunch_restaurants_csv_v1'), isFalse);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('current totals respect calendar day, week and month boundaries',
       (tester) async {
@@ -265,6 +588,7 @@ void main() {
 
   testWidgets('lunch sheet and chart are usable with a narrow keyboard',
       (tester) async {
+    useRestaurantTestDirectory();
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(fuelLogNativeChannel, (call) async {
@@ -294,8 +618,11 @@ void main() {
     await tester.ensureVisible(price);
     await tester.enterText(price, '5');
     await tester.ensureVisible(find.text('Save lunch'));
-    await tester.tap(find.text('Save lunch'));
-    await tester.pumpAndSettle();
+    await waitForRestaurantIo(
+      tester,
+      () => find.text('New lunch').evaluate().isEmpty,
+      start: () => tester.tap(find.text('Save lunch')),
+    );
     tester.view.resetViewInsets();
     await tester.pumpAndSettle();
     expect(find.text('Lunch saved.'), findsOneWidget);

@@ -1,3 +1,5 @@
+/// Custom chart metric definitions and calculations.
+/// Loads chart selections and derives the values shown in charts and notifications.
 part of 'app.dart';
 
 enum _CustomChartMetric {
@@ -83,14 +85,21 @@ class _CustomChartValues {
     double lunchSpent,
   ) {
     final previous = DateTime(now.year, now.month - 1);
-    double fuelFor(DateTime month) => entries
-        .where((entry) =>
-            entry.date.year == month.year && entry.date.month == month.month)
-        .fold<double>(0, (total, entry) => total + entry.total);
+    var fuel = 0.0;
+    var previousFuel = 0.0;
+    var allTimeFuel = 0.0;
+    for (final entry in entries) {
+      final amount = entry.total;
+      allTimeFuel += amount;
+      if (entry.date.year == now.year && entry.date.month == now.month) {
+        fuel += amount;
+      } else if (entry.date.year == previous.year &&
+          entry.date.month == previous.month) {
+        previousFuel += amount;
+      }
+    }
     double monthly(String key, DateTime month) =>
         prefs.getDouble(_monthlyValueKey(key, month)) ?? 0;
-    final fuel = fuelFor(now);
-    final previousFuel = fuelFor(previous);
     final insurance = monthly('insurance', now);
     final previousInsurance = monthly('insurance', previous);
     final carPayment = monthly('car_payment', now);
@@ -103,8 +112,7 @@ class _CustomChartValues {
       _CustomChartMetric.currentTravel: currentTravel,
       _CustomChartMetric.previousTravel:
           _travelExpense(previousFuel, previousInsurance, previousCarPayment),
-      _CustomChartMetric.allTimeFuel:
-          entries.fold<double>(0, (total, entry) => total + entry.total),
+      _CustomChartMetric.allTimeFuel: allTimeFuel,
       _CustomChartMetric.currentFuel: fuel,
       _CustomChartMetric.previousFuel: previousFuel,
       _CustomChartMetric.currentInsurance: insurance,
@@ -114,8 +122,9 @@ class _CustomChartValues {
       _CustomChartMetric.income: income,
       _CustomChartMetric.incomeAfterTravel: income - currentTravel,
       _CustomChartMetric.budget: budget,
-      _CustomChartMetric.budgetRemaining:
-          budget == null ? null : math.max(0, budget - fuel - lunchSpent).toDouble(),
+      _CustomChartMetric.budgetRemaining: budget == null
+          ? null
+          : math.max(0, budget - fuel - lunchSpent).toDouble(),
     };
   }
 }

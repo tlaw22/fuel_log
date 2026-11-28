@@ -1,3 +1,5 @@
+/// About dialog and project information.
+/// Displays bundled README content and provides project and donation links.
 part of '../app.dart';
 
 const String _fuelLogProjectUrl = 'https://github.com/tlaw22/fuel_log';

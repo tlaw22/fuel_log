@@ -1,3 +1,5 @@
+/// Main FuelLog page and local-data coordinator.
+/// Handles the carousel, fuel entry persistence, import/export, backup, and app actions.
 part of '../app.dart';
 
 // ======================= Home =======================
@@ -119,6 +121,50 @@ List<List<String>> _decodeCsv(String source) {
   return rows;
 }
 
+String _csvField(String value) =>
+    (value.contains(',') ||
+            value.contains('"') ||
+            value.contains('\n') ||
+            value.contains('\r'))
+        ? '"${value.replaceAll('"', '""')}"'
+        : value;
+
+Future<String?> _saveCsvFile(String name, Uint8List bytes) async {
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    final sdkInt =
+        await _androidNativeChannel.invokeMethod<int>('androidSdkInt');
+    if (sdkInt == null) {
+      throw StateError('Could not determine the Android version.');
+    }
+    if (sdkInt < 29) {
+      var permission = await Permission.storage.status;
+      if (!permission.isGranted) {
+        permission = await Permission.storage.request();
+      }
+      if (!permission.isGranted) {
+        throw StateError(permission.isPermanentlyDenied
+            ? 'Storage permission is disabled. Enable it in app settings to export CSV.'
+            : 'Storage permission is required to export CSV.');
+      }
+    }
+    return await _androidNativeChannel.invokeMethod<String>('saveCsv', {
+          'name': name,
+          'bytes': bytes,
+        }) ??
+        (throw StateError('Android did not return the saved file path.'));
+  }
+  final location = await getSaveLocation(
+    acceptedTypeGroups: const [
+      XTypeGroup(label: 'CSV files', extensions: ['csv']),
+    ],
+    suggestedName: name,
+  );
+  if (location == null) return null;
+  await XFile.fromData(bytes, mimeType: 'text/csv', name: name)
+      .saveTo(location.path);
+  return kIsWeb ? name : location.path;
+}
+
 /// Displays the fuel log, totals, CSV export, and Bluetooth sharing entry point.
 class HomePage extends StatefulWidget {
   final bool isDarkTheme;
@@ -210,6 +256,40 @@ class _HomePageState extends State<HomePage> {
   int _currentPage = 0;
   int _dataGeneration = 0;
   GlobalKey<_LunchPageState> _lunchKey = GlobalKey<_LunchPageState>();
+  GlobalKey<_ChartsPageState> _chartsKey = GlobalKey<_ChartsPageState>();
+
+  /// Closes settings, shows the page at [page], then runs [action] on it.
+  Future<void> _openFromSettings(
+    int page,
+    Future<void>? Function() action,
+  ) async {
+    Navigator.of(context).pop();
+    await _carouselController.animateToPage(page);
+    for (var attempt = 0; attempt < 20; attempt++) {
+      if (!mounted) return;
+      final pending = action();
+      if (pending != null) {
+        await pending;
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => _SettingsActions(
+          onLogBudgetData: () => _openFromSettings(
+              2, () => _chartsKey.currentState?._showBudgetDataSheet()),
+          onLunchBudget: () =>
+              _openFromSettings(4, () => _lunchKey.currentState?._setBudget()),
+          child: widget.settingsPageBuilder!(context),
+        ),
+      ),
+    );
+  }
+
   AudioPlayer? _saveSoundPlayer;
   bool _soundMuted = false;
   Future<void> _soundMuteSaveQueue = Future<void>.value();
@@ -556,8 +636,9 @@ class _HomePageState extends State<HomePage> {
           'generated reports, and saved pump photos. Fill-ups can only be '
           'restored from a backup CSV. Monthly budget data, generated reports, '
           'and pump photos are not included in CSV backups and cannot be '
-          'restored. Lunch entries, budget, and chart selections are also '
-          'deleted and cannot be restored from CSV backups.',
+          'restored. Lunch entries and the restaurant list can be restored '
+          'from their separate CSV backups; the lunch budget and chart '
+          'selections cannot.',
         ),
         actions: [
           TextButton(
@@ -625,7 +706,12 @@ class _HomePageState extends State<HomePage> {
       }
       await _pendingLunchChartSave;
       await _pendingLunchEntriesSave;
+      await _pendingRestaurantSave;
       final prefs = await SharedPreferences.getInstance();
+      if (!kIsWeb && (prefs.getBool(_restaurantFileKey) ?? false)) {
+        final file = await _restaurantFile();
+        if (await file.exists()) await file.delete();
+      }
       final keysToRemove = prefs.getKeys().where((key) {
         return key == _prefsKey ||
             key == _deletedPrefsKey ||
@@ -633,6 +719,8 @@ class _HomePageState extends State<HomePage> {
             key == _lunchEntriesKey ||
             key == _lunchBudgetKey ||
             key == _lunchChartSelectionKey ||
+            key == _restaurantCsvKey ||
+            key == _restaurantFileKey ||
             _monthlyDataPrefixes.any(key.startsWith);
       }).toList();
       for (final key in keysToRemove) {
@@ -648,6 +736,7 @@ class _HomePageState extends State<HomePage> {
         _deletions = {};
         _dataGeneration++;
         _lunchKey = GlobalKey<_LunchPageState>();
+        _chartsKey = GlobalKey<_ChartsPageState>();
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -778,7 +867,8 @@ class _HomePageState extends State<HomePage> {
                             break;
                         }
                       },
-                      itemBuilder: (context) => <PopupMenuItem<_HomeMenuAction>>[
+                      itemBuilder: (context) =>
+                          <PopupMenuItem<_HomeMenuAction>>[
                         if (!kIsWeb && widget.bluetoothSharePageBuilder != null)
                           PopupMenuItem(
                             enabled: widget.bluetoothShareEnabled,
@@ -830,7 +920,10 @@ class _HomePageState extends State<HomePage> {
                             label: 'Wipe Data',
                           ),
                         ),
-                      ].map((item) => _OutlinedPopupMenuEntry(item: item)).toList(),
+                      ]
+                              .map(
+                                  (item) => _OutlinedPopupMenuEntry(item: item))
+                              .toList(),
                     ),
                   ),
                   Expanded(
@@ -864,11 +957,7 @@ class _HomePageState extends State<HomePage> {
                   IconButton(
                     tooltip: 'Settings',
                     icon: const Icon(Icons.settings_outlined),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: widget.settingsPageBuilder!,
-                      ),
-                    ),
+                    onPressed: _openSettings,
                   ),
                 IconButton(
                   tooltip: widget.isDarkTheme
@@ -889,23 +978,25 @@ class _HomePageState extends State<HomePage> {
             )
           : null,
       floatingActionButton: _loaded
-          ? FloatingActionButton.extended(
-              onPressed: _currentPage == 4
-                  ? () {
-                      final lunch = _lunchKey.currentState;
-                      if (lunch != null) {
-                        lunch._openEntry();
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Lunch is still loading.')),
-                        );
+          ? Padding(
+              padding: const EdgeInsets.only(bottom: 50),
+              child: FloatingActionButton.extended(
+                onPressed: _currentPage == 4
+                    ? () {
+                        final lunch = _lunchKey.currentState;
+                        if (lunch != null) {
+                          lunch._openEntry();
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Lunch is still loading.')),
+                          );
+                        }
                       }
-                    }
-                  : () => _openForm(),
-              icon: const Icon(Icons.add),
-              label: Text(_currentPage == 4 ? 'Add lunch' : 'Fill-up'),
-            )
+                    : () => _openForm(),
+                icon: const Icon(Icons.add),
+                label: Text(_currentPage == 4 ? 'Add lunch' : 'Fill-up'),
+              ))
           : null,
       body: !_loaded
           ? _StartupLoadingScreen(
@@ -1010,7 +1101,7 @@ class _HomePageState extends State<HomePage> {
                             0 => _buildLog(),
                             1 => _buildSummary(),
                             2 => ChartsPage._withLunch(
-                                key: ValueKey('charts-$_dataGeneration'),
+                                key: _chartsKey,
                                 entries: _entries,
                                 distances: _distances,
                                 includeLunch: _includeLunch,
@@ -1026,7 +1117,8 @@ class _HomePageState extends State<HomePage> {
                             _ => LunchPage._withUpdates(
                                 key: _lunchKey,
                                 onEntriesChanged: (entries) {
-                                  if (!mounted || generation != _dataGeneration) {
+                                  if (!mounted ||
+                                      generation != _dataGeneration) {
                                     return;
                                   }
                                   setState(() {
@@ -1175,12 +1267,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// Escapes a CSV field that contains commas, quotes, or line breaks.
-  String _csvField(String v) =>
-      (v.contains(',') || v.contains('"') || v.contains('\n'))
-          ? '"${v.replaceAll('"', '""')}"'
-          : v;
-
   /// Formats a decimal value without unnecessary trailing zeros.
   String _plain(double v) =>
       v == v.roundToDouble() ? v.toInt().toString() : v.toString();
@@ -1222,57 +1308,8 @@ class _HomePageState extends State<HomePage> {
 
     try {
       final export = _createCsvExport();
-      final name = export.name;
-      final bytes = export.bytes;
-      late final String savedLocation;
-
-      if (_isAndroid) {
-        final sdkInt =
-            await _androidNativeChannel.invokeMethod<int>('androidSdkInt');
-        if (sdkInt == null) {
-          throw StateError('Could not determine the Android version.');
-        }
-
-        if (sdkInt < 29) {
-          var permission = await Permission.storage.status;
-          if (!permission.isGranted) {
-            permission = await Permission.storage.request();
-          }
-          if (!permission.isGranted) {
-            final message = permission.isPermanentlyDenied
-                ? 'Storage permission is disabled. Enable it in app settings to export CSV.'
-                : 'Storage permission is required to export CSV.';
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text(message),
-                duration: kAppSnackBarDuration,
-              ),
-            );
-            return;
-          }
-        }
-
-        savedLocation = await _androidNativeChannel
-                .invokeMethod<String>('saveCsv', {
-              'name': name,
-              'bytes': bytes,
-            }) ??
-            (throw StateError('Android did not return the saved file path.'));
-      } else {
-        final location = await getSaveLocation(
-          acceptedTypeGroups: const [
-            XTypeGroup(label: 'CSV files', extensions: ['csv']),
-          ],
-          suggestedName: name,
-        );
-        if (location == null) return;
-        await XFile.fromData(
-          bytes,
-          mimeType: 'text/csv',
-          name: name,
-        ).saveTo(location.path);
-        savedLocation = kIsWeb ? name : location.path;
-      }
+      final savedLocation = await _saveCsvFile(export.name, export.bytes);
+      if (savedLocation == null) return;
 
       if (!mounted) return;
       messenger.showSnackBar(

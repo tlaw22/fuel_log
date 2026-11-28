@@ -1,3 +1,5 @@
+/// Fill-up sound mute control.
+/// Displays and persists the setting used by save confirmation sounds.
 part of '../app.dart';
 
 class _MuteSoundControl extends StatelessWidget {

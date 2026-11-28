@@ -1,3 +1,5 @@
+/// Shared visual theme and style helpers.
+/// Defines palettes, themes, text styles, decorations, and animation durations.
 part of '../app.dart';
 
 // ---- Color palette (coolors.co/palette/000814-001d3d-003566-ffc300-ffd60a) ----
@@ -15,22 +17,38 @@ const Color kLightPrimary = Color(0xFFD5BDAF);
 const Color kLightText = Color(0xFF3B322D);
 
 /// Available color palettes for the application's light and dark themes.
-enum ThemePalette { classic, forest, purpleRaindrops, sage, rose }
+enum ThemePalette {
+  classic,
+  forest,
+  purpleRaindrops,
+  coastalBlues,
+  sage,
+  rose,
+  summerSunset,
+}
 
 List<ThemePalette> _palettesFor(bool isDark) => isDark
     ? const [
         ThemePalette.classic,
         ThemePalette.forest,
-        ThemePalette.purpleRaindrops
+        ThemePalette.purpleRaindrops,
+        ThemePalette.coastalBlues,
       ]
-    : const [ThemePalette.classic, ThemePalette.sage, ThemePalette.rose];
+    : const [
+        ThemePalette.classic,
+        ThemePalette.sage,
+        ThemePalette.rose,
+        ThemePalette.summerSunset,
+      ];
 
 String _paletteName(ThemePalette palette, bool isDark) => switch (palette) {
       ThemePalette.classic => isDark ? 'GitHub Theme' : 'Khaki',
       ThemePalette.forest => 'Forest',
       ThemePalette.purpleRaindrops => 'Purple Raindrops',
+      ThemePalette.coastalBlues => 'Coastal Blues',
       ThemePalette.sage => 'Sage',
       ThemePalette.rose => 'Rose',
+      ThemePalette.summerSunset => 'Summer Sunset',
     };
 
 class _PaletteColors {
@@ -73,6 +91,15 @@ const _paletteColors = <ThemePalette, _PaletteColors>{
     onAccent: Color(0xFF14052D),
     appBar: Color(0xFF260D50),
   ),
+  ThemePalette.coastalBlues: _PaletteColors(
+    background: Color(0xFF012A4A),
+    surface: Color(0xFF013A63),
+    container: Color(0xFF01497C),
+    accent: Color(0xFFA9D6E5),
+    foreground: Colors.white,
+    onAccent: Color(0xFF012A4A),
+    appBar: Color(0xFF013A63),
+  ),
   ThemePalette.sage: _PaletteColors(
     background: Color(0xFFFEFAE0),
     surface: Color(0xFFE9EDC9),
@@ -90,6 +117,15 @@ const _paletteColors = <ThemePalette, _PaletteColors>{
     foreground: Color(0xFF283334),
     onAccent: Colors.white,
     appBar: Color(0xFFEDAFB8),
+  ),
+  ThemePalette.summerSunset: _PaletteColors(
+    background: Color(0xFFFBF8CC),
+    surface: Color(0xFFFDE4CF),
+    container: Color(0xFFFFCFD2),
+    accent: Color(0xFF40334A),
+    foreground: Color(0xFF302A38),
+    onAccent: Color(0xFFFBF8CC),
+    appBar: Color(0xFFF1C0E8),
   ),
 };
 
@@ -212,6 +248,11 @@ ThemeData buildTheme({
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: scheme.surface,
       surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        side: BorderSide(color: scheme.outline, width: 2),
+      ),
+      clipBehavior: Clip.antiAlias,
     ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: scheme.inverseSurface,
@@ -314,6 +355,10 @@ class _OutlinedPopupMenuEntryState<T>
   }
 }
 
+const _minFontSizePercent = 80;
+const _maxFontSizePercent = 200;
+const _fontSizeStep = 10;
+
 class _AppTextScaler extends TextScaler {
   final TextScaler systemScaler;
   final double factor;
@@ -377,7 +422,10 @@ mixin _ThemeSettings on State<FuelLogApp> {
   int _readFontSize(SharedPreferences prefs) {
     try {
       final value = prefs.getInt(_fontSizeKey) ?? 100;
-      if (value < 60 || value > 120 || (value - 60) % 20 != 0) {
+      if (value == 60) return _minFontSizePercent;
+      if (value < _minFontSizePercent ||
+          value > _maxFontSizePercent ||
+          (value - _minFontSizePercent) % _fontSizeStep != 0) {
         throw FormatException('Unknown saved font size: $value');
       }
       return value;
@@ -449,7 +497,9 @@ mixin _ThemeSettings on State<FuelLogApp> {
   }
 
   void _setFontSize(int percent) {
-    if (percent < 60 || percent > 120 || (percent - 60) % 20 != 0) {
+    if (percent < _minFontSizePercent ||
+        percent > _maxFontSizePercent ||
+        (percent - _minFontSizePercent) % _fontSizeStep != 0) {
       throw ArgumentError.value(percent, 'percent', 'Invalid font size');
     }
     _fontSizeWasChanged = true;

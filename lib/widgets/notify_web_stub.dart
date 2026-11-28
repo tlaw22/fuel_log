@@ -1,3 +1,5 @@
+/// Non-browser notification fallback.
+/// Reports unsupported browser notification operations on native platforms.
 Future<bool> requestPermission() =>
     Future.error(UnsupportedError('Browser notifications are unavailable.'));
 

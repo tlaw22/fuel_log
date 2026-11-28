@@ -1,3 +1,5 @@
+/// Lunch budget notification service.
+/// Calculates current spending and updates the platform notification after a lunch entry.
 part of '../app.dart';
 
 class _LunchNotification {
@@ -7,7 +9,8 @@ class _LunchNotification {
   static Future<void> show(
       _LunchEntry entry, List<_LunchEntry> entries, double? budget) async {
     final day = _lunchDay(entry.date);
-    final spent = _lunchTotal(entries.where((item) => _lunchDay(item.date) == day));
+    final spent =
+        _lunchTotal(entries.where((item) => _lunchDay(item.date) == day));
     final remaining = budget == null ? null : math.max(0.0, budget - spent);
     final data = <String, Object?>{
       'kind': 'lunch',
@@ -27,13 +30,15 @@ class _LunchNotification {
     } else if (defaultTargetPlatform == TargetPlatform.windows) {
       await _windowsChannel.invokeMethod<void>('showLunch', data);
     } else if (defaultTargetPlatform == TargetPlatform.android) {
-      final posted =
-          await _androidNativeChannel.invokeMethod<bool>('showLunchNotification', data);
+      final posted = await _androidNativeChannel.invokeMethod<bool>(
+          'showLunchNotification', data);
       if (posted != true) {
-        throw StateError('Notifications are disabled. Enable them in Android settings.');
+        throw StateError(
+            'Notifications are disabled. Enable them in Android settings.');
       }
     } else {
-      throw UnsupportedError('Lunch notifications are not supported on this platform.');
+      throw UnsupportedError(
+          'Lunch notifications are not supported on this platform.');
     }
   }
 

@@ -27,7 +27,15 @@ The home screen uses one carousel with these sections:
   period or restaurant, or the daily budget and remaining amount. Chart
   selections are remembered locally. Weekly
   totals include the whole week even when it crosses a month boundary; each
-  monthly card shows only the days in that month.
+  monthly card shows only the days in that month. **Import lunch CSV** replaces
+  lunch entries after confirmation; **Export lunch CSV** saves them separately
+  from fuel data, including the restaurant, date and time, and price. Select
+  **Other restaurant** to enter a new place; it is added to future suggestions.
+  Native apps keep the editable `FuelLog/lunch_restaurants.csv` in the app
+  documents directory (Android's app directory is private, so export it to
+  edit externally). On the web, the restaurant list is saved in browser storage.
+  **Import restaurants CSV** and **Export restaurants CSV** let you edit or
+  transfer that list; importing replaces the list after confirmation.
 
 The About and Photos pages link to downloads for other platforms.
 
@@ -56,11 +64,13 @@ lunch. If lunch data cannot be loaded, the combined total is unavailable.
 ## Theme
 
 The AppBar theme icon switches between dark and light modes. The palette icon
-offers three choices for the active mode, including Purple Raindrops in dark
-mode. The Settings page also provides both controls. The mode and each mode's
-selected palette are saved locally and restored the next time the app starts.
-Settings also adjusts app text from 60% to 120% of the device text size in
-20% steps. Theme-colored background bubbles can also be disabled in Settings.
+offers four choices for the active mode, including Coastal Blues in dark mode
+and Summer Sunset in light mode. The Settings page also provides both controls.
+The mode and each mode's selected palette are saved locally and restored the
+next time the app starts.
+Settings also adjusts app text from 80% to 200% of the device text size in
+10% steps. A previously saved 60% setting is displayed at 80%.
+Theme-colored background bubbles can also be disabled in Settings.
 Both preferences are saved locally; reduced-motion settings pause bubble motion.
 
 ## Pump photos (Android)
@@ -144,6 +154,8 @@ notification settings rather than an app permission prompt. Android may also
 request notification permission. Notifications can be disabled in system or
 browser settings. The app attempts to remove its notifications when data is
 wiped; Windows may restrict notification removal for unpackaged apps.
+If a browser or Windows notification update fails after saving fuel or lunch,
+the app shows a snackbar; the saved entry remains available.
 
 ## Bluetooth file sharing (Android)
 

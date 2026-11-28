@@ -219,9 +219,11 @@ void main() {
       (true, ThemePalette.classic),
       (true, ThemePalette.forest),
       (true, ThemePalette.purpleRaindrops),
+      (true, ThemePalette.coastalBlues),
       (false, ThemePalette.classic),
       (false, ThemePalette.sage),
       (false, ThemePalette.rose),
+      (false, ThemePalette.summerSunset),
     ]) {
       SharedPreferences.setMockInitialValues({});
       await _start(tester, theme: buildTheme(isDark: isDark, palette: palette));

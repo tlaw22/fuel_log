@@ -1,3 +1,5 @@
+/// Animated application background.
+/// Renders optional decorative bubbles behind the page content without blocking interaction.
 part of '../app.dart';
 
 class _AppBackground extends StatelessWidget {
@@ -10,8 +12,9 @@ class _AppBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final bubbleColor =
-        colors.brightness == Brightness.dark ? colors.primary : colors.onSurface;
+    final bubbleColor = colors.brightness == Brightness.dark
+        ? colors.primary
+        : colors.onSurface;
     return ColoredBox(
       color: theme.scaffoldBackgroundColor,
       child: Stack(
@@ -50,7 +53,8 @@ class _AppBubbles extends StatefulWidget {
   State<_AppBubbles> createState() => _AppBubblesState();
 }
 
-class _AppBubblesState extends State<_AppBubbles> with TickerProviderStateMixin {
+class _AppBubblesState extends State<_AppBubbles>
+    with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) => AnimatedBackground(
         vsync: this,

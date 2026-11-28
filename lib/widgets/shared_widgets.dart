@@ -1,3 +1,5 @@
+/// Shared loading, empty-state, statistics, and reveal widgets.
+/// Provides reusable presentation components used across FuelLog pages.
 part of '../app.dart';
 
 // ======================= Widgets =======================
@@ -25,27 +27,27 @@ class _StartupLoadingScreen extends StatelessWidget {
                   semanticsLabel: 'Loading local data',
                 )
               : ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Could not load local data: $error',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.black87),
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Could not load local data: $error',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.black87),
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: onRetry,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: onRetry,
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            ),
-          ),
+                ),
         ),
       ),
     );
@@ -61,19 +63,21 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.local_gas_station,
-                size: 64, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 12),
-            Text('No fill-ups yet',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 4),
-            const Text('Tap “Fill-up” to log your first one.'),
-          ],
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.local_gas_station,
+                  size: 64, color: Theme.of(context).colorScheme.outline),
+              const SizedBox(height: 12),
+              Text('No fill-ups yet',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              const Text('Tap “Fill-up” to log your first one.'),
+            ],
+          ),
         ),
       ),
     );
@@ -161,56 +165,56 @@ class _WeekRow extends StatelessWidget {
       ),
     );
   }
-
 }
 
 class _LunchInclusionControl extends StatelessWidget {
-    const _LunchInclusionControl({
-      super.key,
-      required this.included,
-      required this.onChanged,
-    });
+  const _LunchInclusionControl({
+    super.key,
+    required this.included,
+    required this.onChanged,
+  });
 
-    final bool included;
-    final ValueChanged<bool>? onChanged;
+  final bool included;
+  final ValueChanged<bool>? onChanged;
 
-    @override
-    Widget build(BuildContext context) => Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text('Include lunch', style: Theme.of(context).textTheme.labelLarge),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('Off')),
-                ButtonSegment(value: true, label: Text('On')),
-              ],
-              selected: {included},
-              showSelectedIcon: false,
-              style: SegmentedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-              ),
-              onSelectionChanged:
-                  onChanged == null ? null : (values) => onChanged!(values.single),
+  @override
+  Widget build(BuildContext context) => Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text('Include lunch', style: Theme.of(context).textTheme.labelLarge),
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: false, label: Text('Off')),
+              ButtonSegment(value: true, label: Text('On')),
+            ],
+            selected: {included},
+            showSelectedIcon: false,
+            style: SegmentedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
             ),
-          ],
-        );
-  }
+            onSelectionChanged: onChanged == null
+                ? null
+                : (values) => onChanged!(values.single),
+          ),
+        ],
+      );
+}
 
-  class _LunchDataError extends StatelessWidget {
-    const _LunchDataError({required this.error, required this.onRetry});
+class _LunchDataError extends StatelessWidget {
+  const _LunchDataError({required this.error, required this.onRetry});
 
-    final String error;
-    final VoidCallback? onRetry;
+  final String error;
+  final VoidCallback? onRetry;
 
-    @override
-    Widget build(BuildContext context) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Could not load lunch data: $error'),
-            TextButton(onPressed: onRetry, child: const Text('Retry')),
-          ],
-        );
-  }
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Could not load lunch data: $error'),
+          TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      );
+}
